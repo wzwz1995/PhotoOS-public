@@ -1,0 +1,8 @@
+# 桌面壳不并进 Python 仓库的东西
+node_modules/
+_dist/
+_shots/
+*.log
+_debug_*
+_probe_*
+_tmpdata/

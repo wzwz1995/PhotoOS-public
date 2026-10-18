@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>输入</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 16px 18px;
+      font: 13px/1.5 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+      background: #0e1424; color: #e8ecf5;
+      display: flex; flex-direction: column; gap: 12px; height: 100vh;
+    }
+    #message { font-size: 13px; color: #cdd5e6; white-space: pre-wrap; }
+    input {
+      width: 100%; height: 34px; padding: 0 10px;
+      border-radius: 8px; border: 1px solid #2a3752; background: #07090f; color: #f4f1ea;
+      font: inherit; outline: none;
+    }
+    input:focus { border-color: #f4d35e; box-shadow: 0 0 0 3px rgba(244, 211, 94, .18); }
+    .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: auto; }
+    button {
+      height: 30px; padding: 0 14px; border-radius: 7px; cursor: pointer;
+      border: 1px solid #2a3752; background: #131b2e; color: #e8ecf5; font: inherit;
+    }
+    button.primary { background: #0a2463; border-color: #2d4a94; }
+    button:focus-visible { outline: 2px solid #f4d35e; outline-offset: 1px; }
+  </style>
+</head>
+<body>
+  <div id="message"></div>
+  <input id="value" autocomplete="off" spellcheck="false">
+  <div class="actions">
+    <button id="cancel" type="button">取消</button>
+    <button id="ok" type="button" class="primary">确定</button>
+  </div>
+  <script>
+    const messageEl = document.getElementById('message')
+    const input = document.getElementById('value')
+    const submit = (value) => window.promptHost.submit(value)
+    const cancel = () => window.promptHost.submit(null)
+
+    window.promptHost.onInit(({ message, defaultValue }) => {
+      messageEl.textContent = message || ''
+      input.value = defaultValue || ''
+      input.focus()
+      input.select()
+      // 自测：自动化验证用，正常运行时不会走到
+      if (window.promptHost.autoTest) setTimeout(() => submit('自动测试:' + input.value), window.promptHost.autoTest)
+    })
+
+    document.getElementById('ok').addEventListener('click', () => submit(input.value))
+    document.getElementById('cancel').addEventListener('click', cancel)
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') { event.preventDefault(); submit(input.value) }
+      if (event.key === 'Escape') { event.preventDefault(); cancel() }
+    })
+  </script>
+</body>
+</html>

@@ -1,0 +1,23 @@
+# 换行统一：仓库里一律 LF，只有 Windows 脚本保持 CRLF。
+#
+# 为什么值得写这个文件：`start-photoos.cmd` **必须**是 CRLF —— 用 LF 存过一版，
+# cmd.exe 把 `if (...)` 块解析散架，刷了一屏"不是内部或外部命令"（实测踩过）。
+# 不写规则的话，取决于每个人本机的 core.autocrlf，克隆出来可能就坏了。
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# 二进制，别让 git 去猜（也别做换行转换）
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.woff2 binary
+*.db binary
+*.npz binary
+*.onnx binary
+*.safetensors binary
+*.NEF binary
+*.nef binary

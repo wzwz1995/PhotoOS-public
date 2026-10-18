@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>PhotoOS</title>
+<style>
+  /* 全画面统一一套字体栈：签名与版本号同族，只靠字号/字重/颜色分层。
+     之前签名用 UI 字体、版本用等宽数字，两套字形并排就显得"不是一家人"。 */
+  :root {
+    --ui: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+    --gold: #f4d35e;
+    --dim: #8aa0c8;
+    --faint: #5c7297;
+  }
+  html, body { margin: 0; height: 100%; background: #0a1226; color: #e8eefc;
+    font-family: var(--ui); overflow: hidden; }
+
+  .wrap { height: 100%; display: grid; place-content: center; gap: 12px; text-align: center; }
+  .brand { font-size: 22px; letter-spacing: .01em; }
+  .brand b { font-weight: 700; }
+  .brand span { color: var(--dim); font-size: 13px; margin-left: 8px; }
+  .msg { font-size: 12.5px; color: var(--dim); }
+  .bar { width: 220px; height: 2px; margin: 2px auto 0; background: #1b2a4a; overflow: hidden; }
+  .bar i { display: block; width: 40%; height: 100%; background: var(--gold);
+    animation: slide 1.15s cubic-bezier(.4,0,.2,1) infinite; }
+  @keyframes slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(250%); } }
+
+  /* 署名：同一字体族，靠字重与颜色分层；"&" 最轻，避免像两个品牌并列 */
+  .sign {
+    margin-top: 10px;
+    display: flex; align-items: baseline; justify-content: center; gap: 8px;
+    font-size: 12px;
+    letter-spacing: .08em;
+    color: var(--faint);
+  }
+  .sign .me { font-weight: 600; color: #c8d6ee; }
+  .sign .amp { color: #46587a; font-weight: 400; }
+  .sign .ai { font-weight: 500; color: #9fb3d4; }
+
+  /* 版本号钉在右下角，不参与居中排版 */
+  .ver {
+    position: fixed; right: 10px; bottom: 8px;
+    font-family: var(--ui);
+    font-size: 10px;
+    font-weight: 400;
+    letter-spacing: .04em;
+    color: #3f5173;
+    font-variant-numeric: tabular-nums;
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand"><b>PhotoOS</b><span>个人摄影管理</span></div>
+    <div class="msg">正在启动本地服务…</div>
+    <div class="bar"><i></i></div>
+    <div class="sign">
+      <span class="me">wswz</span>
+      <span class="amp">&amp;</span>
+      <span class="ai">DeepSeek</span>
+    </div>
+  </div>
+  <div class="ver" id="ver"></div>
+  <script>
+    // 版本号由壳传入（loading.html?v=0.1.0），不写死
+    const v = new URLSearchParams(location.search).get('v');
+    if (v) document.getElementById('ver').textContent = 'v' + v;
+  </script>
+</body>
+</html>

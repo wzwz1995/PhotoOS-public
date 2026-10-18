@@ -1,0 +1,662 @@
+/* ============================================================================
+ * PhotoOS · 分人（人物标签）样式
+ *
+ * 设计系统与其余两个视图同一套（Feihong Design System v8.0 · 场景 06 Console）。
+ * 令牌定义在 `css/tokens.css`（**第一个加载，且是全应用唯一定义处**；
+ * 本文件只消费，不定义任何颜色）。
+ *
+ * ## 一条硬纪律：不做"打分/星级/推荐"的视觉语言
+ *
+ * 这一页最容易滑向"给脸打分"：模型确实算了一个相似度。但那是**机器内部的判据**，
+ * 不是对人的评价。所以：
+ *   · 三档状态（你确认的 / 模型提议的 / 你否决的）用**边框与徽标**区分，
+ *     不用红黄绿、不用进度条、不用百分比；
+ *   · 金色只表示"你的选择 / 当前选中项"，**不表示更好**；
+ *   · 相似度只在建议卡角落以极小灰字出现（`--ink-text-3`），
+ *     作用是"为什么它排在前面"的可核对性。
+ *
+ * ## 布局三坑（与 search.css 同因，这里必须自己再设一次）
+ *
+ * `app.css` 的 `.view.is-active` 是**横向 flex**，往 `<section>` 里直接塞块会被摊成窄柱；
+ * 纵向 flex 的子项默认 `flex-shrink: 1`，容器有固定高度时会被压扁到看不见。
+ * ========================================================================== */
+
+/* 与其余视图同样的纵向布局修正，否则本页会被摊成几根窄柱 */
+#view-people.is-active {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+#view-people > .panel {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+/* --------------------------------------------------------------- 左右两栏 */
+.people-layout {
+  display: grid;
+  grid-template-columns: minmax(240px, 300px) 1fr;
+  gap: 14px;
+  margin-top: 14px;
+  align-items: start;
+}
+
+/* 窄屏：左栏挪到上面，两栏变一栏（否则人脸墙只剩几十像素宽） */
+@media (max-width: 900px) {
+  .people-layout { grid-template-columns: 1fr; }
+}
+
+.people-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.people-detail {
+  min-width: 0;
+}
+
+#view-people .hint { color: var(--ink-text-2); }
+.people-detail .hint { font-size: 13.5px; line-height: 1.7; }
+
+/* 右栏内部的三块（这一页自己建的锚点，见 people.js 的 fillBlocks） */
+.people-detail .person-block {
+  margin-top: 18px;
+}
+
+.people-detail .person-block:empty { display: none; }
+
+/* ------------------------------------------------------- 库里现状 / 提示条 */
+/* 容器（`.people-stats`）由视图 index.html 提供；这里只控制里面填的内容 */
+.people-stats .hint { margin: 0; }
+
+.person-stat-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+
+.person-stat-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--ink-text-3);
+}
+
+.person-stat-chip b {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-text);
+}
+
+/* ------------------------------------------------------------- 人物卡片 */
+.people-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.person-card {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--ink-divider);
+  border-radius: var(--r-md);
+  background: var(--ink-panel-2);
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  transition: border-color 0.16s, background 0.16s, transform 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.person-card:hover {
+  transform: translateY(-1px);
+  border-color: var(--royal-300);
+}
+
+/* 金 = "当前打开的是这一个"（高亮），不是"这个人更好" */
+.person-card.is-active {
+  border-color: rgba(244, 211, 94, 0.45);
+  background: rgba(244, 211, 94, 0.06);
+}
+
+.person-cover {
+  width: 58px;
+  height: 58px;
+  flex: none;
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  background: var(--ink-stage);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.person-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.person-card-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+}
+
+.person-card-name {
+  font-size: 14.5px;
+  font-weight: 500;
+  color: var(--ink-text);
+  overflow-wrap: anywhere;
+}
+
+.person-card-sub {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-text-3);
+}
+
+.person-card-sub strong { color: var(--ink-text-2); font-weight: 500; }
+
+.person-card-tags {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-end;
+  flex: none;
+}
+
+/* --------------------------------------------------------------- 来源徽标 */
+/* 徽标只回答"这一张是谁说的"：你确认的 / 模型提议的 / 你否决的 / 还没有名字。
+   三者都用中性色描边区分，**没有一档表示"更好"**。 */
+.person-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--ink-line);
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  line-height: 17px;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  color: var(--ink-text-3);
+}
+
+.person-tag::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.9;
+}
+
+/* 你说过的：皇家蓝描边（"你的动作"用品牌蓝，与金的高亮语义分开） */
+.person-tag.is-user {
+  color: var(--royal-300);
+  border-color: rgba(123, 157, 219, 0.4);
+  background: rgba(30, 77, 170, 0.14);
+}
+
+/* 模型说的：虚线灰边 —— 一眼看出这不是你的判断 */
+.person-tag.is-auto {
+  color: var(--ink-text-3);
+  border-style: dashed;
+  border-color: var(--ink-line);
+  background: transparent;
+}
+
+/* 你否决的：酒红（语义色，不作装饰） */
+.person-tag.is-rejected {
+  color: var(--wine-400);
+  border-color: rgba(216, 49, 91, 0.4);
+  background: rgba(216, 49, 91, 0.08);
+}
+
+.person-tag.is-unnamed {
+  color: var(--gold-400);
+  border-color: rgba(244, 211, 94, 0.35);
+  background: transparent;
+}
+
+/* 达到判定线：只是"过没过机器那条线"，中性色 —— 过线不等于"更值得要" */
+.person-tag.is-accepted {
+  color: var(--ink-text-2);
+  border-color: var(--ink-line);
+  background: transparent;
+}
+
+/* ------------------------------------------------------------- 右栏头部 */
+.person-head {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--ink-divider);
+}
+
+.person-head-cover {
+  width: 68px;
+  height: 68px;
+  flex: none;
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  background: var(--ink-stage);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.person-head-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.person-head-line {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  flex: 1 1 240px;
+}
+
+.person-head-name {
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--ink-text);
+  overflow-wrap: anywhere;
+}
+
+.person-head-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* --------------------------------------------------- 「模型学到了什么」 */
+/* 皇家蓝**同色系淡底**标记"这是模型的状态"，用 1px 描边而不是左侧 3px 竖条
+ * （那条竖条是卡片上最容易被认出来的 AI 生成痕迹）。 */
+.person-profile {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid rgba(62, 110, 201, 0.42);
+  border-radius: var(--r-md);
+  background: var(--royal-a06);
+}
+
+.person-learned {
+  margin: 0;
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: var(--ink-text);
+}
+
+.person-criteria {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+}
+
+.person-criterion {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--ink-text-3);
+}
+
+.person-criterion b {
+  font-weight: 500;
+  color: var(--ink-text-2);
+}
+
+/* 判据是机器用的数：等宽字体，**不做大字强调**（大字就成了"分数"） */
+.person-criterion i {
+  font-family: var(--font-mono);
+  font-style: normal;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-text);
+}
+
+.person-criterion em {
+  font-style: normal;
+  color: var(--ink-text-3);
+}
+
+.person-notes-label {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--ink-text-2);
+}
+
+.person-notes {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--ink-text-3);
+}
+
+/* ----------------------------------------------------------- 区块与网格 */
+.person-section {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--ink-divider);
+  border-radius: var(--r-lg);
+  background: var(--ink-panel);
+}
+
+.person-block > .person-section { margin-top: 0; }
+
+/* 你确认的：皇家蓝细边（品牌主色 = 你的动作） */
+.person-section.is-user { border-color: rgba(62, 110, 201, 0.42); }
+
+/* 模型提议的：虚线灰边 —— 与"你确认的"一眼可分，且不抢注意力 */
+.person-section.is-auto { border-style: dashed; border-color: var(--ink-line); }
+
+.person-section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink-text);
+}
+
+.person-section-head .hint { margin: 0; }
+
+.person-count {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-text-3);
+}
+
+.person-bulk {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 0 0 10px;
+}
+
+.person-face-wall {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
+  gap: 10px;
+}
+
+/* 空的人脸墙**整个收起来**。
+ * 网格容器即使一张脸都没有，区块边框与内边距仍会在页面上留下一大块空白矩形 ——
+ * 截图里那两个"已确认 0 张 / 已否决 0 张"的空方框就是这么来的，看起来像加载失败。
+ *
+ * ⚠️ 判据必须用 `:not(:has(figure))` 而不是 `:empty`：
+ * 渲染端写的是带缩进与换行的模板串，容器里**有空白文本节点**，
+ * `:empty` 因此永远不命中 —— 第一版就是这么写的，改完截图逐像素相同才发现。
+ * `:has` 在 Edge/Chrome 105+ 可用，本项目是本机单人使用的本地服务，没有兼容负担。 */
+.person-face-wall:not(:has(figure)) {
+  display: none;
+}
+
+/* ------------------------------------------------------------- 人脸卡片 */
+.person-face {
+  position: relative;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--ink-divider);
+  border-radius: var(--r-md);
+  background: var(--ink-panel-2);
+  overflow: hidden;
+  transition: border-color 0.16s, background 0.16s;
+}
+
+.person-face:hover { border-color: var(--ink-line); }
+
+.person-face img {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  display: block;
+  background: var(--ink-base);
+}
+
+.person-face figcaption {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 7px 8px;
+}
+
+/* 三种状态靠**边框**区分（不是靠颜色深浅表示好坏） */
+.person-face.is-face { border-color: rgba(62, 110, 201, 0.38); }
+.person-face.is-auto { border-style: dashed; border-color: var(--ink-line); }
+.person-face.is-suggest { border-color: rgba(244, 211, 94, 0.3); }
+.person-face.is-rejected { border-color: rgba(216, 49, 91, 0.32); opacity: 0.8; }
+
+/* 拍摄时刻：这一页判断"像不像"时的现实依据（同一场拍摄、同一个年龄段） */
+.pf-when {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 原片入口：这张脸长在哪张照片上（可点 → 照片详情：完整路径 / 大图 / 在资源管理器里显示）。
+ * 只有裁出来的脸、没有文件名的话，用户看得出是谁却找不到照片 —— 那等于没结果。
+ *
+ * ⚠️ 这一族（`.pf-file`）已**并入全应用公共件** `.card-file / .card-dir /
+ * .card-open / .card-name`（定义在 `app.css`），标记由 `js/cards.js` 的
+ * `fileBlock()` 产出。挪走的原因不只是去重：人物页这套实现是全应用**唯一**
+ * 一处"文件名可点 = 看原片"，别的页面根本没有 —— 提到公共件之后，
+ * 主题页与「加入主题」弹窗的文件名才第一次能打开原片。
+ * 留这段说明是为了让后来者知道它**去哪了**，别在这里重新定义。 */
+
+/* 相似度：极小且灰。它只解释"为什么排在前面"，不是给人比优劣的 */
+.pf-sim {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--ink-text-3);
+  opacity: 0.85;
+}
+
+.pf-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pf-actions .btn {
+  width: 100%;
+  min-height: 30px;
+  padding: 0 6px;
+  font-size: 12px;
+}
+
+/* --------------------------------------------------------------- 低频判断动作
+ *
+ * 「不是人」是一个**判断性但不常用**的动作：它不该和「是他 / 不是他」抢注意力
+ * （那两个是这一页的主流程），但也不能藏起来 —— 混进来的海报/雕像必须能一键排掉。
+ * 所以默认是幽灵样式，hover 时才显出它的性质：酒红 = 排除。
+ */
+.btn.quiet {
+  background: transparent;
+  border-color: transparent;
+  color: var(--ink-text-3);
+  font-size: 12px;
+  min-height: 30px;
+}
+
+.btn.quiet:hover:not(:disabled),
+.btn.quiet:focus-visible {
+  color: var(--wine-400);
+  border-color: rgba(216, 49, 91, 0.4);
+  background: rgba(216, 49, 91, 0.1);
+}
+
+/* --------------------------------------------------------------- 批量条上的"迁移" */
+.person-move {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.person-move select {
+  min-height: 34px;
+  padding: 0 var(--sp-3);
+  background: var(--ink-panel-2);
+  color: var(--ink-text);
+  border: 1px solid var(--ink-line);
+  border-radius: var(--r-sm);
+  font-family: var(--font-ui);
+  font-size: var(--fs-sm);
+  appearance: none;
+  max-width: 220px;
+}
+
+.person-move select:focus-visible {
+  outline: none;
+  border-color: var(--royal-400);
+  box-shadow: var(--focus);
+}
+
+/* ------------------------------------------------- 左栏底部的两条"回头路" */
+.person-side-block {
+  margin: 14px 0 4px;
+}
+
+.person-archived-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.person-archived-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.person-archived-cover {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  border-radius: var(--r-sm, 4px);
+  overflow: hidden;
+  background: var(--ink-base);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.person-archived-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.pf-pick {
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-sm);
+  background: rgba(4, 15, 42, 0.72);
+  border: 1px solid var(--ink-line);
+}
+
+.pf-pick input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--royal-500);
+  cursor: pointer;
+}
+
+/* 被否决的：默认折叠，展开才占地方 */
+.person-rejected {
+  margin-top: 16px;
+  border: 1px solid var(--ink-divider);
+  border-radius: var(--r-lg);
+  background: var(--ink-panel);
+}
+
+.person-rejected > summary {
+  padding: 10px 14px;
+  cursor: pointer;
+  font-size: 13.5px;
+  color: var(--ink-text-2);
+  list-style: none;
+}
+
+.person-rejected > summary::-webkit-details-marker { display: none; }
+
+.person-rejected > summary::before {
+  content: '▸';
+  display: inline-block;
+  width: 14px;
+  color: var(--ink-text-3);
+}
+
+.person-rejected[open] > summary::before { content: '▾'; }
+
+.person-rejected > .hint,
+.person-rejected > .person-face-wall { margin: 0 14px 12px; }
+
+/* ----------------------------------------------- 模型的新建议（独立区块） */
+.person-suggest {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.person-suggest .person-face-wall { margin-top: 2px; }
+
+/* 已删除：`.people-empty`（2026-10-14）。
+ * 它与 `.search-empty` 是同一种东西的另外两个画法（金左边框的提示盒），
+ * 而全应用的空态组件统一为 `.wb-empty`（phase2.css）。两处样式已全部并入。 */
+
+/* 命令：可选中照抄（这一页跑不了 cv2，只能让用户去命令行）。
+ * ⚠️ 样式**已移到 phase2.css 的 `.cmd-block`** —— 这里原来留着
+ * `white-space: pre-wrap` + `word-break: break-all`，会把一条含解释器绝对路径的
+ * 长命令在窄屏上硬切成几段（与 `.search-cmd` 当初那个缺陷一模一样，
+ * 只是当时只修了找照片那一处）。 */
+
+.people-cmd code { background: none; }
