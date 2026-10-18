@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>PhotoOS · 个人摄影管理</title>
+  <!-- ⚠️ 加载顺序有意义：tokens.css **必须第一个** —— 它是全应用唯一的令牌定义处。
+       其余六张表只消费令牌，不定义令牌。见 css/tokens.css 顶部说明。 -->
+  <link rel="stylesheet" href="/static/css/tokens.css">
+  <link rel="stylesheet" href="/static/css/app.css">
+  <link rel="stylesheet" href="/static/css/phase2.css">
+  <link rel="stylesheet" href="/static/css/modal.css">
+  <link rel="stylesheet" href="/static/css/search.css">
+  <link rel="stylesheet" href="/static/css/people.css">
+  <link rel="stylesheet" href="/static/css/help.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">PhotoOS</span>
+      <span class="phase" id="phase-badge">个人摄影管理</span>
+    </div>
+    <!--
+      标签顺序 = 实际工作流的顺序（这也是本次重排的唯一依据）：
+        看全库 → 逐组精选 → 按内容/时间找人 → 按人归拢 → 组成主题 → 维护 → 查说明
+    -->
+    <nav class="tabs" role="tablist">
+      <button class="tab is-active" data-view="library" role="tab">照片库</button>
+      <button class="tab" data-view="review" role="tab">精选</button>
+      <button class="tab" data-view="search" role="tab">找照片</button>
+      <button class="tab" data-view="people" role="tab">人物</button>
+      <button class="tab" data-view="collections" role="tab">主题</button>
+      <button class="tab" data-view="maintenance" role="tab">维护</button>
+      <button class="tab" data-view="help" role="tab">说明</button>
+    </nav>
+    <div class="statusline" id="statusline">
+      <span class="dot" id="health-dot"></span>
+      <span id="health-text">连接中…</span>
+    </div>
+  </header>
+
+  <!-- ======================= 照片库的筛选台（顶栏，占满宽度） =======================
+       为什么在顶栏而不在侧栏：这是**主筛选台** —— 内容 / 元数据 / 人物三个维度
+       要能同时叠加，还要边筛边翻看。侧栏那一列放不下，而且它已经被
+       "目录树 + 浏览轴 + 索引状态"占满了（那三块是"翻看"的工具，不是筛选）。
+
+       三个维度是**叠加（AND）**关系，不是互斥的几种模式 ——
+       "妈妈 + 2026 年 + 广角 + 像日落的"是一个合法的条件组合。
+
+       内容输入框的候选词由后端给（`/api/semantic/queries`），
+       前端不硬编码任何词。 -->
+  <section class="lib-filter" id="lib-filter">
+    <div class="lf-head">
+      <button class="lf-toggle" id="lf-toggle" type="button" aria-expanded="false">
+        <span class="lf-caret" aria-hidden="true">▸</span>
+        <span>筛选</span>
+      </button>
+      <span class="lf-summary" id="lf-summary"></span>
+      <span class="lf-spacer"></span>
+      <button class="btn small" id="filter-reset">全部重置</button>
+    </div>
+
+    <div class="lf-body" id="lf-body" hidden>
+      <div class="lf-grid">
+        <div class="lf-group">
+          <div class="lf-group-head">内容</div>
+          <div class="lf-group-body">
+            <select id="filter-content" title="库里预先算好的内容词">
+              <option value="">（不用内容筛）</option>
+            </select>
+            <input id="filter-content-q" type="search" placeholder="或打一个词（需先在命令行准备）"
+                   autocomplete="off">
+          </div>
+          <p class="hint tiny">按画面找"像什么的照片"。与下面的条件**叠加**。</p>
+        </div>
+
+        <div class="lf-group">
+          <div class="lf-group-head">元数据</div>
+          <div class="lf-group-body">
+            <!-- 顺序按**成对宽度**排：前两行各放两个短下拉，状态单独一行。
+                 挤在一起时"每行放几个"由宽度决定，所以把宽度相近的挨着放，
+                 换行位置才稳（不是随手排的顺序）。 -->
+            <label class="field"><span>年份</span>
+              <select id="filter-year"><option value="">全部</option></select></label>
+            <label class="field"><span>类型</span>
+              <select id="filter-type">
+                <option value="">全部</option>
+                <option value="raw">RAW</option>
+                <option value="jpeg">JPEG</option>
+                <option value="heic">HEIC</option>
+                <option value="png">PNG</option>
+                <option value="tiff">TIFF</option>
+                <option value="video">视频</option>
+              </select></label>
+            <label class="field"><span>机型</span>
+              <select id="filter-camera"><option value="">全部</option></select></label>
+            <label class="field"><span>镜头</span>
+              <select id="filter-lens"><option value="">全部</option></select></label>
+            <label class="field"><span>状态</span>
+              <select id="filter-status">
+                <option value="">全部</option>
+                <option value="OK">正常</option>
+                <option value="PENDING">待处理</option>
+                <option value="MISSING">缺失</option>
+                <option value="UNREADABLE">无法读取</option>
+              </select></label>
+            <label class="check">
+              <input id="filter-nometa" type="checkbox"><span>只看缺元数据的</span></label>
+          </div>
+          <div class="lf-focal">
+            <span class="lf-mini">焦距（毫米）</span>
+            <div class="focal-range">
+              <input id="filter-focal-min" type="number" min="0" step="1" placeholder="不限"
+                     inputmode="numeric" aria-label="焦距下限">
+              <span class="focal-sep">–</span>
+              <input id="filter-focal-max" type="number" min="0" step="1" placeholder="不限"
+                     inputmode="numeric" aria-label="焦距上限">
+            </div>
+            <!-- 快捷区间由后端按**真实分布**给（含每个区间的张数），不在前端写死 -->
+            <div class="focal-presets" id="focal-presets"></div>
+            <p class="hint tiny" id="focal-note"></p>
+          </div>
+        </div>
+
+        <div class="lf-group">
+          <!-- 关键词是**跨字段的文本匹配**（文件名 / 机型 / 镜头），与上面那些
+               结构化下拉不是一类，也与「内容」不是一类（那个是模型算的画面相似度）。
+               所以给它自己的分组 —— 三者的区别一眼可见。 -->
+          <div class="lf-group-head">关键词</div>
+          <div class="lf-group-body">
+            <label class="field lf-keyword"><span>文件名 / 机型 / 镜头</span>
+              <input id="filter-q" type="search" placeholder="例如 DSC_1894 或 TAMRON"
+                     autocomplete="off"></label>
+          </div>
+          <p class="hint tiny">纯文本匹配，不经过模型 —— 与「内容」是两回事。</p>
+        </div>
+
+        <div class="lf-group">
+          <div class="lf-group-head">人物
+            <span class="hint tiny">多个是「同时在场」</span>
+          </div>
+          <div class="lf-group-body lf-people">
+            <div class="lf-chips" id="filter-people-chips"></div>
+            <select id="filter-person-add" title="把一个人加进条件">
+              <option value="">＋ 选一个人…</option>
+            </select>
+          </div>
+          <p class="hint tiny">勾两个人 = 找**合影**（两个人都在这张照片里）。</p>
+        </div>
+
+        <div class="lf-group">
+          <div class="lf-group-head">输出</div>
+          <div class="lf-group-body">
+            <label class="field"><span>排序</span>
+              <select id="filter-sort">
+                <option value="capture">拍摄时间（新→旧）</option>
+                <option value="name">文件名</option>
+                <option value="size">文件大小</option>
+                <option value="recent">最近索引</option>
+              </select></label>
+            <label class="field"><span>每页</span>
+              <select id="page-size">
+                <option value="100">100</option>
+                <option value="300" selected>300</option>
+                <option value="1000">1000</option>
+              </select></label>
+          </div>
+          <!-- 继续加载也放这里：它和"每页"是同一件事的两半（一页多少 / 再要一页），
+               分在两处会让人以为没关系。工具栏那边因此只剩一句汇总。 -->
+          <button class="btn lf-load-more" id="load-more">继续加载</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <main id="main">
+    <!-- ============================ 照片库 ============================ -->
+    <section class="view is-active" id="view-library">
+      <div class="view-head">
+        <h1 class="view-head-title">照片库</h1>
+        <span class="view-head-note" id="library-head-note">按目录、时间或主题翻看全库</span>
+      </div>
+      <!-- 左栏 + 内容区：**必须是独立的一行**。
+           上面加了页头之后，如果这一层不存在，`.view` 的纵向 flex 会把
+           侧栏与网格上下摞起来 —— 网格就跑到屏幕外面去了
+           （实测截图里右半边整片空白，正是这么来的）。 -->
+      <div class="library-body">
+      <aside class="sidebar">
+        <div class="panel">
+          <div class="panel-head">
+            <h2>照片库</h2>
+            <button class="btn small" id="library-import" type="button"
+                    title="把照片复制进照片库：选源目录，并选择照片落在哪里">导入照片</button>
+            <button class="btn small ghost" id="library-add" type="button" hidden
+                    title="（已废弃）当前版本只支持一个照片库">+ 添加…</button>
+          </div>
+          <div id="library-list" class="library-list"></div>
+        </div>
+
+        <!-- 添加照片库：单对话框，桌面壳里「选目录…」调系统选择器 -->
+        <div class="wb-modal" id="library-add-modal" hidden>
+          <div class="wb-modal-card">
+            <div class="wb-modal-head">
+              <div>
+                <h2>添加照片库</h2>
+                <span class="wb-modal-sub">照片只读；PhotoOS 只在库根写一个 .photoos 标记文件</span>
+              </div>
+              <button class="wb-modal-x" id="library-add-close" type="button" aria-label="关闭"
+                      title="关闭（Esc）">
+                <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+                  <path d="M1.5 1.5 L10.5 10.5 M10.5 1.5 L1.5 10.5" stroke="currentColor"
+                        stroke-width="1.6" stroke-linecap="round"/>
+                </svg>
+              </button>
+            </div>
+            <div class="wb-modal-body">
+              <label class="field grow"><span>目录</span>
+                <div class="row">
+                  <input id="library-add-path" type="text" placeholder="例如 E:\\照片">
+                  <button class="btn small" id="library-add-pick" type="button" hidden>选目录…</button>
+                </div>
+              </label>
+              <label class="field grow"><span>名称（留空 = 用目录名）</span>
+                <input id="library-add-name" type="text" placeholder="我的照片库"></label>
+              <label class="check"><input type="checkbox" id="library-add-marker" checked>
+                写入 .photoos 标记（换盘符或换电脑后能自动认回这个库）</label>
+              <p class="hint tiny" id="library-add-hint">选好目录后点「添加」。</p>
+            </div>
+            <div class="wb-modal-foot">
+              <span class="spacer"></span>
+              <button class="btn" id="library-add-cancel" type="button">取消</button>
+              <button class="btn primary" id="library-add-submit" type="button">添加</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>浏览</h2>
+          <div class="seg-group" id="browse-axis" role="tablist">
+            <button class="seg is-active" data-axis="path" role="tab">文件夹</button>
+            <button class="seg" data-axis="time" role="tab">时间</button>
+            <button class="seg" data-axis="selection" role="tab">精选状态</button>
+            <button class="seg" data-axis="collection" role="tab">主题</button>
+          </div>
+          <div class="browse-list" id="browse-list"></div>
+        </div>
+
+        <div class="panel">
+          <h2>索引状态</h2>
+          <div id="library-stats" class="stats"></div>
+        </div>
+        <!-- 系统区：设置 / 账号（预留）/ 退出。
+           放在侧栏底部这块空位 —— 它属于"应用级"操作，不属于照片筛选。
+           「退出」只在桌面壳里可用（网页版没有进程可退）。 -->
+      <div class="side-system" id="side-system">
+        <div class="side-system-head">系统</div>
+        <button class="side-system-row" id="side-settings" type="button">
+          <span class="ss-label">设置</span>
+          <span class="ss-hint">分组阈值 · 数据维护</span>
+        </button>
+        <button class="side-system-row" id="side-jobs" type="button">
+          <span class="ss-label">后台任务</span>
+          <span class="ss-hint">扫描 · 索引 · 导入 的进度</span>
+        </button>
+        <button class="side-system-row" type="button" disabled title="账号系统尚未提供">
+          <span class="ss-label">账号</span>
+          <span class="ss-hint">预留</span>
+        </button>
+        <button class="side-system-row is-danger" id="btn-quit-side" type="button" hidden>
+          <span class="ss-label">退出</span>
+          <span class="ss-hint">连后端一起关闭</span>
+        </button>
+      </div>
+    </aside>
+
+      <div class="content">
+        <div class="toolbar">
+          <div class="summary" id="grid-summary">载入中…</div>
+        </div>
+
+        <!-- 「当前条件」：把左栏筛的东西、以及正在看的范围汇总成一行可逐个撤掉的芯片。
+             内容是 js/query_bar.js 从 state 算出来的**只读投影** —— 这里不放任何状态。
+             位置刻意在工具栏之下、网格之上：它是"你正在看什么"的标题，
+             不是又一个筛选控件（改条件仍然回左栏）。 -->
+        <div class="query-bar" id="library-query" hidden></div>
+
+        <div class="crumbs wide" id="grid-crumbs"></div>
+
+        <div class="grid-scroll" id="grid-scroll">
+          <div class="grid" id="grid"></div>
+        </div>
+        <!-- 读取失败时的**持久**状态（网格之上、与网格同级切换）。
+             以前失败只弹一条 toast，几秒就没了，而网格还留着上一次的内容 ——
+             用户会以为"这就是全部结果"。内容由 shared.js 的 errorHtml 产出。 -->
+        <div class="grid-error" id="grid-error" hidden></div>
+      </div>
+      </div>
+    </section>
+
+    <!-- ============================== 精选 ============================== -->
+    <section class="view" id="view-review">
+      <header class="wb-head">
+        <div class="wb-headline">
+          <p class="wb-eyebrow">一个场景一次过完</p>
+          <h1 class="wb-title view-head-title is-hero">精选</h1>
+          <p class="wb-sub">
+            系统把同一场景的照片按时序摆好、把连拍并成一组。
+            你只需要对<em>几个</em>组做决定 —— 剩下的一路划过。
+          </p>
+        </div>
+        <div class="wb-mark" aria-hidden="true">N°02</div>
+      </header>
+
+      <div class="wb-toolbar" id="review-picker"></div>
+      <div class="wb-kpis" id="review-status"></div>
+
+      <!-- 「当前条件」：这一页筛的是**场景**（地点 / 日期 / 关键词），
+           与照片库、找照片共用同一条 .query-bar（内容由 js/query_bar.js 投影出来）。
+           刻意放在工作台两栏**之外**：键盘流（←/→/空格/数字）不受影响。 -->
+      <div class="query-bar" id="review-query" hidden></div>
+
+      <div class="review-layout">
+        <div class="panel review-main" id="review-viewer"></div>
+        <aside class="panel review-side">
+          <div class="wb-side-head">
+            <h2>相似组</h2>
+            <span class="wb-side-tag">一次决定一组</span>
+          </div>
+          <p class="hint tiny">
+            连拍与同一机位的重复构图被摆到一起。单张组可以一路 <kbd>Space</kbd> 划过。
+            分组不对时按 <kbd>V</kbd> 手动拆分 / 合并。
+          </p>
+          <p class="hint tiny">
+            按时间邻接分组，<strong>抓不住</strong>「构图相似但相隔较远」的照片。
+            <kbd>,</kbd> / <kbd>.</kbd> 或上方数字框可调阈值。
+          </p>
+          <div id="review-groups" class="review-groups"></div>
+        </aside>
+      </div>
+
+      <div class="panel wide" id="review-adjust-panel" hidden></div>
+      <div class="panel wide" id="review-help-panel" hidden></div>
+    </section>
+
+    <!-- ============================== 找照片 ============================== -->
+    <section class="view" id="view-search">
+      <div class="panel wide">
+        <div class="view-head">
+          <h1 class="view-head-title">找照片</h1>
+          <span class="view-head-note" id="search-total"></span>
+        </div>
+        <p class="hint">
+          两种找法用途不同：
+          <strong>按画面内容</strong>用来「找出所有某类照片」；
+          <strong>按时间 / 地点 / 场次</strong>用来「分出某一次拍摄」——后者是<strong>精确</strong>的。
+        </p>
+
+        <!-- 「当前条件」：两种找法共用同一条 —— 内容模式显示搜索词，
+             时间/地点模式显示城市、场次、起止、最少拍摄组，每个都能单独撤掉。
+             内容是 js/query_bar.js 从 state 算出来的**只读投影**。 -->
+        <div class="query-bar" id="search-query" hidden></div>
+
+        <div class="find-modes" role="tablist">
+          <button class="find-mode is-active" data-mode="content" role="tab">按画面内容</button>
+          <button class="find-mode" data-mode="when" role="tab">按时间 / 地点 / 场次</button>
+        </div>
+
+        <!-- ---------- 模式一：按画面内容 ---------- -->
+        <div id="mode-content">
+          <div class="search-bar">
+            <select id="search-pick" class="search-pick" aria-label="选择要找的东西"></select>
+            <input id="search-input" class="search-input" type="search"
+                   placeholder="或直接打一个词（需先在命令行准备）" autocomplete="off">
+            <button class="btn primary" id="search-go">搜索</button>
+          </div>
+          <div id="search-learning"></div>
+          <div id="search-summary"></div>
+          <div id="search-results" class="search-results"></div>
+          <!-- 多选操作条：吸在视图底部，往上滚着挑照片时永远够得着。
+               内容（已选几张 / 按钮）由 search.js 渲染，空了就整条隐藏。 -->
+          <div class="pick-bar" id="search-pick-bar" hidden></div>
+        </div>
+
+        <!-- ---------- 模式二：按时间 / 地点 / 场次（确定性） ---------- -->
+        <div id="mode-when" hidden>
+          <p class="hint tiny">
+            这一层查的是<strong>目录与拍摄时间</strong>，不经过任何模型，
+            所以<strong>不会混进别的城市或别的年份</strong>。
+          </p>
+          <div class="find-form">
+            <label>城市
+              <select id="find-city"><option value="">（全部）</option></select>
+            </label>
+            <label>场次关键词
+              <input id="find-session" type="search" placeholder="如 2025-10-18"
+                     autocomplete="off">
+            </label>
+            <label>从
+              <input id="find-from" type="date">
+            </label>
+            <label>到
+              <input id="find-to" type="date">
+            </label>
+            <label>最少 Shot
+              <input id="find-min-shots" type="number" min="1" placeholder="不限">
+            </label>
+            <button class="btn primary" id="find-go">筛选</button>
+          </div>
+          <div id="find-summary"></div>
+          <div id="find-results" class="find-results"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================== 人物 ============================== -->
+    <section class="view" id="view-people">
+      <div class="panel wide">
+        <div class="view-head">
+          <h1 class="view-head-title">人物</h1>
+          <div class="view-head-actions">
+            <button class="btn" id="people-new">新建人物</button>
+            <button class="btn" id="people-learn-all">重新学习全部</button>
+          </div>
+        </div>
+        <p class="hint">
+          系统只能提出「这里有一簇可能是同一个人的脸」，<strong>它不知道那是谁</strong>。
+          你命名并确认几张之后，它会拿你的判断去找更多 —— 你确认得越多，它越准。
+        </p>
+        <div id="people-stats" class="people-stats"></div>
+        <div class="people-layout">
+          <div id="people-list" class="people-list"></div>
+          <div id="people-detail" class="people-detail"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================== 主题 ============================== -->
+    <section class="view" id="view-collections">
+      <div class="panel wide">
+        <div class="view-head">
+          <h1 class="view-head-title">主题</h1>
+          <span class="view-head-actions">
+            <button class="btn primary" id="btn-collection-new">新建主题</button>
+          </span>
+        </div>
+        <p class="hint">
+          主题是<strong>你主动创建的长期作品集合</strong>，不受时间、地点或场次限制 ——
+          「蓝调时刻」可以横跨不同年份与城市。同一张照片可以同时属于多个主题。
+        </p>
+        <p class="hint tiny">
+          加入或移出只改变数据库关系，<strong>不移动、不复制、不删除任何照片</strong>。
+          照片硬盘离线时，主题列表、封面与排序仍然可用。
+        </p>
+        <div class="collections-layout">
+          <div id="collections-list" class="collections-list"></div>
+          <div id="collections-detail" class="collections-detail"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================== 维护 ============================== -->
+    <section class="view" id="view-maintenance">
+      <!-- 目录：维护页东西多，先给一张"地图"。条目由 app.js 从 .maint-group 生成 -->
+      <nav class="maint-toc" id="maint-toc" aria-label="维护页目录"></nav>
+
+      <div class="view-head">
+        <h1 class="view-head-title">维护</h1>
+        <span class="view-head-note">导入、索引任务、完整性与备份 —— 都在这里</span>
+      </div>
+      <div class="panel wide">
+        <h2>导入新照片</h2>
+        <p class="hint">
+          选择原始素材目录 → <strong>预演</strong> → 确认后执行。
+          照片与视频会按拍摄时间与 GPS 归入 <code>&lt;城市&gt;\&lt;时段&gt;\</code>。
+          <strong>源文件只被读取，不会被移动、改名或删除。</strong>
+        </p>
+        <p class="hint tiny">
+          「预演抽样」只决定<strong>预演看多少个</strong>；点「确认执行」会处理源里的全部文件。
+          相机没连手机定位时整段都没有 GPS，境外拍摄的坐标也可能不在离线缓存里 ——
+          这两种情况请填<strong>强制城市</strong>，它会压过 GPS 判定。
+        </p>
+        <div class="row import-form">
+          <label class="field grow">
+            <span>源目录</span>
+            <input id="import-source" type="text" placeholder="例如 C:\CameraImport\20261011 或存储卡盘符">
+        </label>
+          <label class="field grow"><span>照片落在哪</span>
+            <input id="import-root" type="text" placeholder="照片库位置，例如 D:\照片库"
+                   title="照片会被复制到这里，并按拍照时间归到日期文件夹；原文件不动">
+          </label>
+          <button class="btn small" id="import-root-pick" type="button" hidden>选目录…</button>
+          <label class="field">
+            <span>强制城市（可选）</span>
+            <input id="import-city" type="text" placeholder="留空 = 按 GPS 判定">
+          </label>
+          <label class="field">
+            <span>照片库</span>
+            <select id="import-library"></select>
+          </label>
+          <label class="field">
+            <span>视频库</span>
+            <select id="import-video-library">
+              <option value="">（源中不含视频时可不选）</option>
+            </select>
+          </label>
+          <!-- ⚠️ 这一格**不要**加 `inline`（标签摆到控件左边）。
+               同一横排里其余四格都是"标签在上"，只有它横着摆的话，
+               它的控件会比旁边四个**高出 8px** —— 用户看到的就是"没对齐"。 -->
+          <label class="field">
+            <span>预演抽样</span>
+            <input id="import-limit" type="number" value="300" min="1" step="50">
+          </label>
+          <button class="btn" id="btn-import-plan">预演</button>
+          <button class="btn primary" id="btn-import-apply" disabled>确认执行</button>
+        </div>
+        <div id="import-result" class="import-result"></div>
+          <div id="import-task" class="import-task" hidden></div>
+      </div>
+
+<details class="maint-group" open>
+  <summary><span><b>分组与阈值</b><em>切分规则与相似度；改完点「现在分组」才生效</em></span></summary>
+      <div class="maint-body">
+        <div class="panel-head">
+          <h2>Scene 划分阈值</h2>
+          <div>
+            <button class="btn primary small" id="btn-scene-config-save">保存</button>
+          </div>
+        </div>
+        <p class="hint">
+          Scene 是"一次能筛完的一组照片"。自动切分不准时先调这里；只想改某一两场，
+          就去精选页用「并入前一场 / 从当前张拆开」。
+        </p>
+        <div class="row">
+          <div class="field inline">
+            <label for="scene-gap-seconds">时间断点（秒）</label>
+            <input type="number" id="scene-gap-seconds" min="30" max="86400" step="30">
+          </div>
+          <div class="field inline">
+            <label for="scene-merge-similarity">合并相似度</label>
+            <input type="number" id="scene-merge-similarity" min="0" max="1" step="0.01">
+          </div>
+          <div class="field inline">
+            <label for="scene-unrelated-similarity">不相似阈值</label>
+            <input type="number" id="scene-unrelated-similarity" min="0" max="1" step="0.01">
+          </div>
+          <div class="field inline">
+            <label for="scene-dissimilar-run">连续几张算不相似</label>
+            <input type="number" id="scene-dissimilar-run" min="1" max="100" step="1">
+          </div>
+          <div class="field inline">
+            <label for="scene-max-shots">单场上限（组）</label>
+            <input type="number" id="scene-max-shots" min="1" max="1000" step="1">
+          </div>
+        </div>
+        <p class="hint" id="scene-config-hint">（载入中…）</p>
+      </div>
+
+      <!-- 界面直跑命令：命令与参数由服务端固定（见 actions/catalog.py），
+           浏览器只能选一个 action id —— 这里没有"执行任意命令"的入口。 -->
+</details>
+<details class="maint-group" open>
+  <summary><span><b>数据维护</b><em>完整性检查、备份、重复报告，以及可在界面直跑的命令</em></span></summary>
+      <div class="maint-body">
+        <h2>完整性与备份</h2>
+        <div class="row">
+          <button class="btn" id="btn-integrity">检查数据库完整性</button>
+          <button class="btn" id="btn-backup">立即备份数据库</button>
+          <button class="btn" id="btn-duplicates">重复内容报告</button>
+        </div>
+        <pre class="output" id="tools-output">（结果会显示在这里）</pre>
+      </div>
+
+      <!-- Scene 划分阈值：改这里 → 下次 `scenes rebuild`（界面上是「现在分组」）
+           就按新阈值切。保存只写 data/config.json 里的这几项，不动其它配置。 -->
+      <div class="maint-body">
+        <div class="migrate-block">
+          <div class="row">
+            <span class="hint tiny">数据库版本 <b id="migrate-version">–</b>
+              / 期望 <b id="migrate-expected">–</b></span>
+            <button class="btn small" id="migrate-run" type="button"
+                    title="备份 → 迁移 → 校验；失败会自动回滚">立即迁移</button>
+          </div>
+          <div class="hint tiny" id="migrate-result">升级前会自动备份；迁移前后会校验版本与记录数。</div>
+        </div>
+
+        <div class="panel-head">
+          <h2>命令（界面直跑）</h2>
+          <div>
+            <button class="btn small" id="btn-actions-dialog">在弹窗里挑一条…</button>
+          </div>
+        </div>
+        <div id="actions-panel" class="actions-panel"></div>
+      </div>
+
+</details>
+<details class="maint-group" open>
+  <summary><span><b>数据根</b><em>数据库、缩略图、备份放在哪个目录</em></span></summary>
+  <div class="maint-body">
+    <div class="dataroot-now">
+      <div class="dr-row"><span class="dr-label">当前</span>
+        <code id="dataroot-current">（读取中…）</code></div>
+      <div class="dr-meta hint tiny" id="dataroot-meta"></div>
+    </div>
+    <label class="field grow"><span>目标目录</span>
+      <input id="dataroot-input" type="text" placeholder="例如 D:\\PhotoOS\\data"></label>
+    <div class="row">
+      <button class="btn small" id="dataroot-validate" type="button">检查这个目录</button>
+      <button class="btn small" id="dataroot-pick" type="button" hidden>选目录…</button>
+      <button class="btn primary small" id="dataroot-use-existing" type="button" disabled>使用已有库</button>
+      <button class="btn small" id="dataroot-create" type="button" disabled>在这里新建空库</button>
+    </div>
+    <p class="hint tiny" id="dataroot-hint">切换后需要重启应用才生效（避免两个进程写同一个库）。</p>
+  </div>
+</details>
+<details class="maint-group" open>
+  <summary><span><b>AI 组件</b><em>按需下载：装了才有语义搜索与人脸；下载源可改</em></span></summary>
+  <div class="maint-body">
+    <div id="ai-components" class="ai-components"></div>
+    <div class="row ai-tools">
+      <button class="btn small ghost" id="ai-cleanup" type="button"
+              title="清理安装失败后留下的包（GPU 回滚残留等）">清理残留</button>
+      <span class="hint tiny" id="ai-cleanup-hint">卸载会删除包与模型文件，需重新下载。</span>
+    </div>
+    <div class="ai-mirrors">
+      <div class="ai-mirror-row">
+        <label class="field grow"><span>Python 包镜像（pip）</span>
+          <input id="ai-pip-mirror" type="url" placeholder="https://pypi.tuna.tsinghua.edu.cn/simple"></label>
+        <button class="btn small" id="ai-pip-test" type="button">测试</button>
+      </div>
+      <div class="ai-mirror-row">
+        <label class="field grow"><span>模型镜像</span>
+          <input id="ai-model-mirror" type="url" placeholder="https://hf-mirror.com"></label>
+        <button class="btn small" id="ai-model-test" type="button">测试</button>
+      </div>
+      <div class="row">
+        <button class="btn primary small" id="ai-mirror-save" type="button">保存镜像</button>
+        <span class="hint tiny" id="ai-mirror-hint">下载不动时先点「测试」，再换一个能连通的地址。</span>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="maint-group" open>
+  <summary><span><b>离线与库状态</b><em>换盘重绑定、当前库的健康摘要</em></span></summary>
+      <div class="maint-body">
+        <h2>离线照片库</h2>
+        <p class="hint">
+          拔掉照片硬盘后，索引、缩略图、拍摄信息与精选记录依然可用。
+          把硬盘插回（或换盘符）后用下面的重绑定恢复原图访问 —— 不需要重新导入。
+        </p>
+        <div id="rebind-list" class="rebind"></div>
+      </div>
+
+      <!-- 「库状态」：给用户看的健康摘要。
+           ⚠️ 这里**有意不显示配置项与文件系统路径**（数据根、数据库文件、
+           缩略图目录…）。那些是排障用的实现细节，摆在日常界面上既没有用、
+           也不像一个成品该有的样子。路径只在真出问题时由「说明」页或日志给出。 -->
+      <div class="maint-body">
+        <h2>库状态</h2>
+        <div id="about-output" class="lib-status"></div>
+        <div class="diag">
+          <div id="diagnostics" class="hint tiny">（读取中…）</div>
+          <div class="row">
+            <button class="btn small ghost" id="diag-copy" type="button">复制诊断信息</button>
+          </div>
+        </div>
+      </div>
+
+    
+      <!-- 后台任务：进度列表固定在维护页最下面 —— 它是"一直在动"的东西，
+           不该和「点一下就走」的操作抢位置。 -->
+      <div class="panel wide">
+        <h2>后台任务</h2>
+        <div id="jobs-table" class="jobs"></div>
+      </div>
+    </section>
+
+    <!-- ============================== 说明 ============================== -->
+    <section class="view" id="view-help">
+      <div class="view-head">
+        <h1 class="view-head-title">说明</h1>
+        <span class="view-head-note">每个功能解决什么、怎么用、有哪些真实限制</span>
+      </div>
+      <div class="panel wide" id="help-body"></div>
+    </section>
+  </main>
+
+  <!-- 「添加照片到主题」对话框：主题页与工作台共用同一个（见 js/pick_modal.js） -->
+  <div id="pick-modal" class="wb-modal" hidden></div>
+
+  <!-- 原片查看器：**中央弹窗**（不是侧边抽屉）。
+       照片库点一张、找照片/人物点「看原片」都落到这里。
+       里面给的是"这张原片在哪"（完整路径 + 复制 + 在资源管理器里显示），
+       而不是"从浏览器下载" —— 文件本来就在本机。 -->
+  <div class="asset-modal" id="asset-modal" hidden aria-hidden="true" role="dialog" aria-modal="true">
+    <div class="asset-modal-backdrop" id="asset-modal-backdrop"></div>
+    <div class="asset-modal-panel" role="document">
+      <div class="asset-modal-head">
+        <span class="asset-modal-title" id="asset-modal-title">照片</span>
+        <span class="asset-modal-actions">
+          <a class="btn small" id="asset-modal-open" href="#" target="_blank" rel="noopener">用浏览器打开原图</a>
+          <button class="btn small" id="asset-modal-close">关闭</button>
+        </span>
+      </div>
+      <div class="asset-modal-body" id="asset-modal-body"></div>
+    </div>
+  </div>
+
+  <!-- 打包完成的结果框：给路径，不给下载 -->
+  <div class="asset-modal" id="pack-result" hidden></div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script type="module" src="/static/js/app.js"></script>
+</body>
+</html>

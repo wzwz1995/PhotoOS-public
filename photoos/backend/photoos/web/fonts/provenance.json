@@ -1,0 +1,55 @@
+[
+  {
+    "file": "PlayfairDisplay-latin-italic.woff2",
+    "family": "PlayfairDisplay",
+    "style": "italic",
+    "weights": [
+      400
+    ],
+    "bytes": 21884,
+    "sha256": "eabce94d4a69e439cd050755c31f9894ac8a78f93e58b063c6c01f370474e1de",
+    "source": "https://fonts.gstatic.com/s/playfairdisplay/v40/nuFRD-vYSZviVYUb_rj3ij__anPXDTnCjmHKM4nYO7KN_qiTXtHA-Q.woff2"
+  },
+  {
+    "file": "PlayfairDisplay-latin.woff2",
+    "family": "PlayfairDisplay",
+    "style": "normal",
+    "weights": [
+      400,
+      500,
+      700,
+      900
+    ],
+    "bytes": 38404,
+    "sha256": "e0c764a8e9e1cce92163c55bac4b2ad6cd4cf8c696ce2289ab5c41565e65b7e2",
+    "source": "https://fonts.gstatic.com/s/playfairdisplay/v40/nuFiD-vYSZviVYUb_rj3ij__anPXDTzYgA.woff2"
+  },
+  {
+    "file": "Inter-latin.woff2",
+    "family": "Inter",
+    "style": "normal",
+    "weights": [
+      300,
+      400,
+      500,
+      600,
+      700
+    ],
+    "bytes": 48256,
+    "sha256": "3100e775e8616cd2611beecfa23a4263d7037586789b43f035236a2e6fbd4c62",
+    "source": "https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7.woff2"
+  },
+  {
+    "file": "JetBrainsMono-latin.woff2",
+    "family": "JetBrainsMono",
+    "style": "normal",
+    "weights": [
+      400,
+      500,
+      700
+    ],
+    "bytes": 31432,
+    "sha256": "83c005d49d8a6a50474c73a5a36ac0468076e9c4a29da7bdb14995d80560a5be",
+    "source": "https://fonts.gstatic.com/s/jetbrainsmono/v24/tDbv2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8yKwBNntkaToggR7BYRbKPxDcwg.woff2"
+  }
+]

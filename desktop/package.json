@@ -1,0 +1,62 @@
+{
+  "name": "photoos-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PhotoOS 桌面壳（Electron）：把本机 127.0.0.1 上的 PhotoOS 装进一个原生窗口",
+  "main": "main.js",
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "electron .",
+    "start:attach": "electron . --attach",
+    "start:inspect": "electron . --inspect-shell --remote-debugging-port=9333",
+    "dist": "electron-builder --win --x64",
+    "dist:dir": "electron-builder --win --x64 --dir"
+  },
+  "devDependencies": {
+    "electron": "44.9.0",
+    "electron-builder": "26.15.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron",
+      "electron-builder",
+      "esbuild"
+    ]
+  },
+  "build": {
+    "appId": "local.photoos.desktop",
+    "productName": "PhotoOS",
+    "electronDist": "node_modules/electron/dist",
+    "directories": {
+      "output": "_dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "prompt.html",
+      "preload-prompt.js",
+      "lib/**/*",
+      "assets/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../_runtime",
+        "to": "runtime",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "assets/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}
