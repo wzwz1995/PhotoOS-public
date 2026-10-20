@@ -1,0 +1,24 @@
+# PhotoOS 项目根标记文件 —— 请勿删除。
+#
+# 作用：config.find_project_root() 通过向上查找本文件来定位项目根，因此
+# 代码仓库可以位于项目根下的任意子目录，而数据根（data/）始终固定在项目根。
+#
+# ⚠️ **本文件不承载任何配置**：代码只判断它"存不存在"（`config.PROJECT_MARKER`），
+#    既不解析也不读取下面的 [project]。真正的运行时配置是 `data/config.json`
+#    （优先级：构造参数 > `PHOTOOS_*` 环境变量 > config.json > 默认值）。
+#    往这里加键不会改变任何行为 —— 想调参数请改 `data/config.json` 或环境变量。
+#
+# 目录约定（见 PHASE1_TECH_PLAN.md §3）：
+#   C:\PhotoOS\
+#     photoos.toml      <- 本标记文件
+#     data\             <- photoos.db / thumbnails / previews / jobs / logs / backups（整体可迁移）
+#     photoos\          <- 代码仓库（backend / web / tests）
+#     legacy\           <- 既有 PowerShell 工具链只读归档
+#     _samples\         <- 实测样本（NEF 等）
+#
+# 铁律：data/ 与 photoos/ 都可以整体搬迁；照片原文件永远在外部存储上，绝不进入本目录。
+
+[project]
+name = "PhotoOS"
+plan = "photoos/PHASE1_TECH_PLAN.md"
+phase = 1

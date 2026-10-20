@@ -1,0 +1,316 @@
+/* ============================================================================
+ * PhotoOS · 说明页样式
+ *
+ * ## 这一页的定位
+ *
+ * 它把**功能怎么用、有什么限制**集中在一个地方，于是其余界面只需要说
+ * "这一步要做什么"，不必在每块面板里铺一段说明书。这也是为什么这里可以
+ * 用比较大的排版呼吸感 —— 别的页面都在做判断，只有这一页是给人读的。
+ *
+ * ## 排版取舍（都服从 DNA，不是随手写）
+ *
+ * · **标题用衬线（Playfair Display）**：长文阅读场景，衬线比无衬线更容易"读进去"。
+ * · **步骤用衬线数字 + 金色圆点**：DNA 明令禁止浏览器默认的 ul/ol 样式，
+ *   所以这里全部手工重排（序号用衬线大字，没有默认圆点与缩进）。
+ * · **限制条目用酒红细线**：限制是需要被看见的内容，用品牌点缀色标出来；
+ *   但只用一条 2px 的左边线，不做整块红底（那会变成告警条，把限制渲染成错误）。
+ * · **命令行块用等宽 + 深蓝底**：和「找照片」页里那段可复制命令同一套视觉，
+ *   让用户认出"这是要照抄的东西"。
+ * ========================================================================== */
+
+/* ------------------------------------------------------------------ 目录 */
+.help-toc {
+  border-bottom: 1px solid var(--ink-divider);
+  padding-bottom: 18px;
+  margin-bottom: 8px;
+}
+
+.help-toc-head {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--ink-text-2);
+  margin: 0 0 12px;
+}
+
+.help-toc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+}
+
+.help-toc-list li {
+  margin: 0;
+}
+
+/* 目录项做成小卡片而不是默认链接：默认蓝下划线是本项目的禁忌之一。
+ * ⚠️ 卡片样式必须挂在 `<a>` 上 —— 它才是那个盒子。
+ * 早先把 `display:inline-flex` 加在了里面的 `<span class="help-toc-tab">` 上，
+ * 于是外层 `<a>` 仍是行内元素、两个 span 直接叠在一起（截图里目录是糊成一团的）。
+ * 这是 DOM 结构与样式对不上，不是配色问题。 */
+.help-toc-list a {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 7px 13px;
+  border: 1px solid var(--ink-line);
+  border-radius: var(--r-pill);
+  background: var(--ink-panel-2);
+  color: var(--ink-text-2);
+  text-decoration: none;
+  font-family: var(--font-ui);
+  font-size: var(--fs-base);
+  white-space: nowrap;
+  transition: border-color var(--dur-base) var(--ease),
+              color var(--dur-base) var(--ease),
+              box-shadow var(--dur-base) var(--ease);
+}
+
+/* 键盘焦点必须看得见：只换文字颜色不够（实测这条是唯一一个没有焦点环的元素）。
+ * 现在与全应用共用同一个焦点环令牌。 */
+.help-toc-list a:hover,
+.help-toc-list a:focus-visible {
+  color: var(--gold-500);          /* 金 = 高亮当前项，不是"更好" */
+  border-color: var(--gold-a45);
+  outline: none;
+  box-shadow: var(--focus-tight);
+}
+
+/* 前缀（"照片库""人物"……）：弱化成引路的小字，主角是后面的小节名。
+ * 用次级色而非最弱一级 —— 它仍是要读的字（最弱一级在深底上低于 AA）。 */
+.help-toc-tab {
+  color: var(--ink-text-2);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+
+.help-toc-title {
+  color: inherit;
+}
+
+/* ------------------------------------------------------------------ 分节 */
+.help-section {
+  padding: 30px 0 6px;
+  border-top: 1px solid var(--ink-divider);
+  margin-top: 26px;
+  scroll-margin-top: 18px;
+}
+
+.help-section:first-of-type {
+  border-top: none;
+  margin-top: 8px;
+}
+
+.help-section h2 {
+  font-family: var(--font-display);
+  font-size: clamp(20px, 2.4vw, 27px);
+  font-weight: 600;
+  color: var(--ink-text);
+  margin: 0 0 var(--sp-1);
+  letter-spacing: 0.01em;
+}
+
+/* 标题下的金色短线：DNA 的招牌细节，也是"分节"的视觉锚点 */
+.help-section h2::after {
+  content: '';
+  display: block;
+  width: 46px;
+  height: 2px;
+  margin-top: 10px;
+  background: linear-gradient(90deg, var(--gold-500), rgba(244, 211, 94, 0));
+}
+
+.help-what {
+  font-family: var(--font-ui);
+  font-size: 15px;
+  line-height: 1.85;
+  color: var(--ink-text-2);
+  margin: 16px 0 20px;
+  max-width: var(--measure-prose);   /* 限宽是为了可读，不是为了对齐 */
+}
+
+.help-section h3,
+.help-label {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ink-text-3);
+  margin: 0 0 10px;
+}
+
+/* ------------------------------------------------------------------ 怎么做（步骤） */
+.help-how {
+  list-style: none;
+  counter-reset: help-step;
+  margin: 0 0 22px;
+  padding: 0;
+  max-width: var(--measure-list);
+}
+
+.help-how li {
+  counter-increment: help-step;
+  position: relative;
+  padding: 0 0 0 42px;
+  margin: 0 0 11px;
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--ink-text-2);
+}
+
+/* 序号：衬线数字（DNA 要求），金色，绝对定位到左侧 */
+.help-how li::before {
+  content: counter(help-step);
+  position: absolute;
+  left: 0;
+  top: 1px;
+  width: 26px;
+  text-align: right;
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-style: italic;
+  color: var(--gold-500);
+  opacity: 0.85;
+}
+
+/* ------------------------------------------------------------------ 限制 */
+.help-limits {
+  list-style: none;
+  margin: 0 0 20px;
+  padding: 0;
+  max-width: var(--measure-list);
+  border-left: 2px solid rgba(216, 49, 91, 0.5);
+}
+
+.help-limits li {
+  position: relative;
+  padding: 2px 0 2px 20px;
+  margin: 0 0 9px;
+  font-family: var(--font-ui);
+  font-size: var(--fs-base);
+  line-height: 1.8;
+  color: var(--ink-text-2);
+}
+
+/* 手工圆点，不用默认 list-style（DNA：禁止任何 HTML 默认样式） */
+.help-limits li::before {
+  content: '';
+  position: absolute;
+  left: 8px;
+  top: 12px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--wine-600);
+  opacity: 0.85;
+}
+
+/* ------------------------------------------------------------------ 命令行 */
+/* 「要照抄的东西」用墨底 + 等宽字 + 描边标出。
+ *
+ * ⚠️ 具体样式**已移到 phase2.css 的 `.cmd-block`**（`.help-cli` 是它的别名之一）。
+ * 三个页面都要贴这种命令块，各写一遍的后果已经出现过：找照片那处修好了换行，
+ * 人物与说明两处仍是坏的。同一个组件只留一份声明。 */
+.help-cli {
+  max-width: var(--measure-code);
+  margin: 4px 0 20px;
+}
+
+/* ------------------------------------------------------------------ 页脚 */
+.help-version {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-text-2);
+  border-top: 1px solid var(--ink-divider);
+  padding-top: 14px;
+  margin-top: 34px;
+}
+
+/* ------------------------------------------------------------------ 窄屏 */
+@media (max-width: 700px) {
+  .help-toc-list {
+    gap: 6px 8px;
+  }
+
+  .help-toc-tab {
+    padding: 6px 11px;
+    font-size: 12px;
+  }
+
+  .help-how li {
+    padding-left: 34px;
+  }
+
+  .help-how li::before {
+    width: 22px;
+    font-size: 15px;
+  }
+}
+
+
+/* ============================================================================
+ * 目录移到左栏（2026-10-18）
+ *
+ * 原来目录是页顶一整条、把正文往下推；说明页章节多，用户想跳转时还得
+ * 先滚回顶部。改成两栏：目录固定在左、正文在右，滚动时目录跟着走。
+ * 窄屏（<1000px）退回单栏，目录回到正文上方。
+ */
+#help-body {
+  display: grid;
+  grid-template-columns: minmax(190px, 232px) minmax(0, 1fr);
+  gap: 10px 30px;
+  align-items: start;
+  align-content: start;   /* 同维护页：别让多余高度摊到每一行 */
+}#help-body { display: block; }
+#help-body > .help-toc {
+  float: left;
+  /* 右侧正文限宽（measure-prose ≈ 643px），一大片空白；
+     目录自己却被挤成 200px、长标题被截断。把左栏放宽到 300px 正好吃掉空白。 */
+  width: 300px;
+  margin: 0 40px 12px 0;
+  border-bottom: 0;
+}
+#help-body > .help-toc-list { display: flex; flex-direction: column; gap: 4px; }
+#help-body > :not(.help-toc) { margin-left: 340px; }
+@media (max-width: 1180px) {
+  #help-body > .help-toc { float: none; width: auto; margin: 0 0 12px;
+    border-bottom: 1px solid var(--ink-divider); padding-bottom: 12px; }
+  #help-body > :not(.help-toc) { margin-left: 0; }
+  #help-body > .help-toc-list { flex-direction: row; flex-wrap: wrap; gap: 8px 10px; }
+}
+#help-body > .help-toc {
+  grid-column: 1;
+  position: sticky;
+  top: 10px;
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: 0;
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+}
+#help-body > .help-toc-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+#help-body > .help-section { grid-column: 2; }
+
+@media (max-width: 1000px) {
+  #help-body { display: block; }
+  #help-body > .help-toc {
+    position: static; max-height: none; margin-bottom: 12px;
+    padding-bottom: 12px; border-bottom: 1px solid var(--ink-divider);
+  }
+  #help-body > .help-toc-list { flex-direction: row; flex-wrap: wrap; gap: 8px 10px; }
+}
+
+/* 目录项占满左栏：原来是"按文字宽度的小胶囊"，300px 栏里参差不齐像没对齐 */
+#help-body > .help-toc .help-toc-list li { width: 100%; }
+#help-body > .help-toc .help-toc-list a { display: flex; width: 100%; box-sizing: border-box; }
+#help-body > .help-toc .help-toc-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

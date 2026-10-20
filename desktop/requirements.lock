@@ -1,0 +1,28 @@
+# PhotoOS 运行时依赖（不含开发依赖、不含 imageio-ffmpeg）
+# 视频缩略图需要额外装：pip install imageio-ffmpeg==0.6.0（可选）
+annotated-doc==0.0.5
+annotated-types==0.8.0
+anyio==4.15.1
+blake3==1.0.11
+click==8.5.0
+ExifRead==3.5.1
+fastapi==0.143.0
+h11==0.16.0
+idna==3.20
+imageio-ffmpeg==0.6.0
+numpy==2.5.4
+onnxruntime==1.31.0
+opentelemetry-api==1.45.1
+pillow==12.3.0
+pillow_heif==1.8.0
+pydantic==2.14.0
+pydantic-settings==2.15.0
+pydantic_core==2.50.0
+python-dotenv==1.2.4
+python-multipart==0.0.32
+rawpy==0.27.1
+starlette==1.7.0
+typing-inspection==0.4.4
+typing_extensions==4.16.0
+uvicorn==0.54.0
+virtualenv==21.14.11
