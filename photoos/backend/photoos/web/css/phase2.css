@@ -1,0 +1,2046 @@
+/* 品牌字体的 @font-face 已于 2026-10 移到 `css/tokens.css` ——
+ * 那里才是 `--font-display/--font-ui/--font-mono` 的定义处，
+ * 字体文件与引用它的令牌应该放在一起（原先它们分在两个文件里，
+ * 而且 `web/fonts/brand-fonts.css` 还留着一份从未被引用的副本，已删）。 */
+
+/* ============================================================================
+ * PhotoOS · Phase 2 样式（精选工作台 + 主题）
+ *
+ * 设计系统：**Feihong Design System v8.0 · 场景 06 Console**
+ *   · 三色基因：皇家蓝 #0A2463 / 复古金 #F4D35E / 酒红 #D8315B（严格用这三个值）
+ *   · 语义：皇家蓝 = 导航与主操作；金 = 高亮与成功；酒红 = 错误与危险（一屏 ≤2 处）
+ *   · 字体：Playfair Display（标题/数字）+ Inter（全部 UI）+ JetBrains Mono（数据/文件名）
+ *     + Noto Serif SC / Noto Sans SC（中文，走系统字体栈）；字体文件已本地化，零外网请求
+ *   · 圆角分级：小元素 4px、卡片 8/12px、大容器 20px（不做全局大圆角）
+ *   · 阴影偏皇家蓝，不用通用黑阴影；不用纯黑/纯白大面积
+ *
+ * ## 全应用的组件契约（2026-10 UI 统一后，七个标签页共用一套）
+ *
+ *   切页（顶栏）        `.tab`        —— 金色下边框 + 金字 = 当前页
+ *   页内分段（侧栏/筛选）`.seg`        —— 皇家蓝实心 = 当前维度
+ *   页内模式（找照片）   `.find-mode`  —— 金色下边框（与 `.tab` 同一语义，同一尺度家族）
+ *   页头               `.view-head`  —— 衬线标题 + 右侧动作 + 一条分隔线
+ *   宽度/节奏          `--gutter` / `--flow` —— 在"页面骨架"一节统一决定
+ *   控件               `.btn` / 全局 select·input 规则 + `--focus` 焦点环
+ *   空态               `.wb-empty`（独立态带框 / 内嵌态去框）
+ *
+ * 三者的分工是**刻意的**：`金 = 当前项`（含"当前页"），`皇家蓝 = 进行中的操作`。
+ * 改前同一件事有三种长相、两种蓝，现在各就各位。
+ *
+ * ## 为什么是**深色**而不是 Console 规范里的暖米白
+ *
+ * Console 场景默认浅色（暖米白 #FDFBF6）。本页**有意偏离**，理由是领域性的：
+ * 这一页的全部内容是"看一眼照片然后判断"，浅色底会抬高周围亮度、
+ * 影响对照片本身明暗与色彩的判断（修图/选片工具几乎都是深色，同一原因）。
+ * DNA 明确给出了深色模式令牌（底色 #0A0E1A / 卡片 #121828 / 分隔线 #1E2740），
+ * 且 Console 规范只禁止"3:4 图文卡片"用深色 —— 所以这是**规范内的选择**，
+ * 不是破例。三色语义、字体策略、圆角分级、阴影色相全部照守。
+ *
+ * ## 视觉纪律（沿用 Phase 2 的产品约束）
+ *
+ * **不做任何"评分/星级/推荐"的视觉语言** —— PRD §9.2 明确禁止"AI 替用户选择"。
+ * 状态徽标只表达"你把这张放到哪一档"，不表达好坏；金色是"高亮"不是"更好"。
+ * ========================================================================== */
+
+/* ------------------------------------------------------------------ 品牌令牌
+ *
+ * ⚠️ 令牌**不再定义在本文件**。2026-10 UI 统一时全部搬到 `css/tokens.css`
+ * （第一个加载），因为原来这里和 app.css 的 `:root` 各定义了一遍同名变量
+ * （--accent / --border / --text …），谁生效取决于文件顺序与选择器层级两件
+ * 互不相干的事。现在本文件只**消费**令牌。
+ *
+ * 本文件仍保留：精选工作台、主题页、页头/空态/控件/徽标的完整组件样式。
+ */
+
+/* 工作台整体：底色与径向微光已在 tokens.css 的 body 上统一，
+ * 这里只补它自己的下边距。 */
+#view-review.view { padding-bottom: var(--sp-7); }
+
+/* ⚠️ 必须把这些视图改成**纵向**排布。
+ *
+ * app.css 里 `.view.is-active { display: flex }` —— 是**横向** flex。
+ * 于是直接放进 section 的每一个块（页头、工具栏、KPI 条、两栏区）
+ * 都成了"同一行里的列"，各自按内容宽度收缩：
+ * 第一次截图看到的就是几根被挤扁的窄柱，文字一行只放得下几个字。
+ * 纵向 + 可滚动才是这一页该有的形状。
+ *
+ * ⚠️ 2026-10-14 补：维护页**一直漏在这张名单外**。它因此被排成五根并排的窄柱
+ * （"导入新照片"只剩 150px 宽），我用 `getBoundingClientRect` 量出来相邻面板的
+ * 间距是 **-951px** —— 它们根本不是上下关系。
+ *
+ * ⚠️ 但**照片库不在名单里**：它天生是"左栏 + 内容"的横向两栏，强行改成纵向
+ * 会把网格挤到屏幕外（实测截图里右半边整片空白就是那一下）。
+ * 照片库的页头 + 两栏结构由 `.library-body` 单独管（见下）。 */
+#view-maintenance.view,
+#view-review.view,
+#view-collections.view,
+#view-people.view,
+#view-help.view,
+#view-search.view {
+  flex-direction: column;
+  align-items: stretch;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
+}
+/* ⚠️ 第二层坑：`.view` 有固定高度（`height:100%`），纵向 flex 的默认
+ * `flex-shrink: 1` 会让每个块**被压缩**去迁就容器高度 ——
+ * 实测 `.wb-head` 被压到 40px，里面的标题因为 `align-items:flex-end` + 裁切
+ * 直接跑到 y = -19（负坐标，看不见）。
+ * 所以子项一律 `flex: 0 0 auto`：保持自然高度，超出就让容器滚动。 */
+#view-maintenance.view > *,
+#view-review.view > *,
+#view-collections.view > *,
+#view-people.view > *,
+#view-help.view > *,
+#view-search.view > * {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+/* 照片库：页头在上，左栏与网格在下面**一行**里。
+ * `.grid-scroll` 自己滚动，所以这一层不滚动（`overflow: hidden`）。 */
+#view-library.view {
+  flex-direction: column;
+  align-items: stretch;
+  overflow: hidden;
+  min-height: 0;
+}
+.library-body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+}
+
+/* ============================================================================
+ * 页面骨架：**一处**决定左右留白与块间距
+ *
+ * 改前实测：同一个精选页里 `.wb-head` 内缩 28px、`.wb-toolbar` 20px、
+ * 两块面板的 margin 14px 但 padding 16px —— 工具栏比页头窄 8px、正文又窄 8px，
+ * 同页三种左边距，肉眼看得出来"没对齐"。七个标签页之间更乱：
+ * 照片库用 14px、维护页用 16px、说明页什么都不加（靠 `.panel` 的 12px）。
+ *
+ * 现在只有一条规则：**每个视图的直接子块统一吃 `--gutter` 与 `--flow`**。
+ * 例外只有两个，都写在下面：
+ *   · `.library-body` —— 左右两栏结构，由 `.sidebar` 与 `.grid-scroll` 各自管留白；
+ *   · `.review-layout` —— 两栏网格，同上（它自己带 padding）。
+ * ========================================================================== */
+#view-maintenance.view > *:not(.library-body),
+#view-review.view > *:not(.library-body):not(.review-layout),
+#view-collections.view > *:not(.library-body),
+#view-people.view > *:not(.library-body),
+#view-help.view > *:not(.library-body),
+#view-search.view > *:not(.library-body) {
+  margin-left: var(--gutter);
+  margin-right: var(--gutter);
+}
+/* 上下块之间的呼吸：改前维护页两块**贴在一起**（间距 0），
+ * 其它页是 14px —— 同一个应用里两种节奏，看起来像两套东西。 */
+.view > .panel + .panel,
+.view > div + .panel,
+.view > .panel + div:not(.panel),
+#view-review.view > * + *,
+#view-collections.view > * + *,
+#view-people.view > * + *,
+#view-help.view > * + *,
+#view-search.view > * + * {
+  margin-top: var(--flow);
+}
+/* 页头已经带下边距，紧跟在它后面的块不用再叠一层 */
+.view > .view-head + * { margin-top: 0; }
+
+/* 最后一个块与视口底边之间留出呼吸（改前内容直接贴着底边被切掉） */
+#view-maintenance.view > *:last-child,
+#view-review.view > *:last-child,
+#view-collections.view > *:last-child,
+#view-people.view > *:last-child,
+#view-help.view > *:last-child,
+#view-search.view > *:last-child {
+  margin-bottom: var(--sp-7);
+}
+
+/* ------------------------------------------------------------------ 面板宽度
+ *
+ * 改前 `.panel.wide { max-width: 1100px }` 卡死了所有页面的内容宽度：
+ * 1600px 视口下主题页只用了 700px、右侧 900px 全是空的，
+ * 维护页/说明页右侧也各空 400px —— 看起来像没做完。
+ *
+ * 约定：**工作区占满，长文限宽**。
+ *   · 工作区（人物/主题/维护/精选/找照片）= 撑满可用宽度，高效利用屏幕；
+ *   · 说明页是"给人读的" = 正文限 72ch 可读行宽，但**整块居中**，
+ *     不再让目录折成三行、右侧留一片荒地。 */
+.panel.wide { max-width: none; }
+
+#view-help .panel.wide {
+  max-width: calc(var(--measure) + 460px);
+  margin-left: auto;
+  margin-right: auto;
+  padding: var(--sp-6) var(--sp-7) var(--sp-7);
+}
+
+/* ------------------------------------------------------------------ 页头（七个标签页共用）
+ *
+ * 之前同一个角色有四种做法：13px 的 `.panel h2`（找照片/人物/维护）、
+ * `clamp(1.3rem…)` 的主题、`clamp(1.6rem…)` 的工作台、什么都不加的说明页。
+ * 现在统一到一个组件：标题用衬线显示体 + 同一档字号，右侧放动作，
+ * 下面一条分隔线把它和内容分开。
+ *
+ * 唯一的例外是**精选工作台**：它的标题是"这一场拍摄的名字"，
+ * 属于那种页面里的主视觉（hero），刻意比标签页标题大一档。 */
+.view-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-5);
+  flex-wrap: wrap;
+  margin: 0 0 var(--sp-5);
+  padding: var(--sp-5) 0 var(--sp-4);
+  border-bottom: 1px solid var(--ink-divider);
+}
+
+/* 照片库的页头长在两栏之上，自己带左右留白 */
+#view-library.view > .view-head {
+  flex: 0 0 auto;
+  margin: var(--sp-4) var(--gutter) 0;
+  padding-top: 0;
+}
+
+.view-head-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-title);
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+  color: var(--ink-text);
+}
+
+.view-head-note {
+  font-family: var(--font-ui);
+  font-size: var(--fs-sm);
+  /* 页头副标题是**要读的**一句说明，不是可有可无的装饰 */
+  color: var(--ink-text-2);
+}
+
+.view-head-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+/* ------------------------------------------------------------------ 表单控件（全局）
+ *
+ * 维护页那两个输入框一直是**浏览器的默认白盒子**（实测 `background: rgb(255,255,255)`、
+ * `border: 2px rgb(118,118,118)`、高 21px），夹在一排深色按钮中间 ——
+ * 根因是 app.css 只写了 `select, input[type=search]`，而它们是 `type="text"`。
+ *
+ * 所以这里把"控件长什么样"提成**全局一条**（而不是每个视图各写一遍）：
+ * 深底、品牌描边、统一高度与焦点环。各视图原有的、id 限定的规则更具体，
+ * 仍然可以覆盖它 —— 这一条负责的是"没人管的地方"。 */
+select,
+input[type="text"],
+input[type="search"],
+input[type="number"],
+input[type="date"],
+input[type="datetime-local"] {
+  /* 与 `.btn` 同一个令牌 —— 这一条是"控件等高"的关键（见 tokens.css）。 */
+  height: var(--control-h);
+  box-sizing: border-box;
+  padding: 6px 10px;
+  background: var(--ink-panel-2);
+  color: var(--ink-text);
+  border: 1px solid var(--ink-line);
+  border-radius: var(--r-sm);
+  font-family: var(--font-ui);
+  font-size: var(--fs-base);
+  /* 原生控件必须重置：不重置时各浏览器长相不一（P0 断言守这条） */
+  appearance: none;
+}
+
+/* ⚠️ `textarea` **不能**共用 `--control-h`：它是多行的，钉成一行高会把
+ * 输入区压扁。它只共享配色与描边那一套。 */
+textarea {
+  min-height: calc(var(--control-h) * 1.6);
+  padding: 6px 10px;
+  background: var(--ink-panel-2);
+  color: var(--ink-text);
+  border: 1px solid var(--ink-line);
+  border-radius: var(--r-sm);
+  font-family: var(--font-ui);
+  font-size: var(--fs-base);
+  appearance: none;
+}
+
+/* ⚠️ `appearance:none` 的代价：所有 select 都失去了"这是下拉框"的唯一提示。
+ * 改前只有精选页自己画了一个箭头，其余页面（照片库筛选、维护页选库、
+ * 找照片选城市、人物迁移）的下拉框看起来和输入框一模一样。
+ * 现在这一条统一供给**全部** select，精选页自己那条更具体的规则仍然生效。 */
+select {
+  padding-right: 34px;
+  cursor: pointer;
+  background-image: var(--chevron);
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+}
+
+select:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: none;
+  border-color: var(--royal-400);
+  box-shadow: var(--focus);
+}
+
+/* 悬停：控件在深底上需要一点反馈，否则不知道能不能点 */
+select:hover,
+input[type="text"]:hover,
+input[type="search"]:hover,
+input[type="number"]:hover,
+input[type="date"]:hover,
+input[type="datetime-local"]:hover,
+textarea:hover { border-color: var(--royal-300); }
+
+input:disabled,
+select:disabled,
+textarea:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* 日期选择器的日历按钮在深色底上是黑图标，看不见 —— 反相它 */
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.75);
+  cursor: pointer;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--ink-text-3);
+}
+
+/* ------------------------------------------------------------------ 状态徽标 */
+.sel-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px;
+  border-radius: var(--r-pill);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+  letter-spacing: 0.01em;
+  border: 1px solid var(--ink-line);
+  white-space: nowrap;
+}
+.sel-badge::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.9;
+}
+/* 未审阅：中性灰（没有信息，就不给颜色） */
+.sel-unreviewed { color: var(--ink-text-3); border-color: var(--ink-divider); background: transparent; }
+/* 候选：皇家蓝家族 = 进行中 */
+.sel-candidate { color: var(--royal-300); border-color: rgba(123, 157, 219, 0.38); background: rgba(30, 77, 170, 0.16); }
+/* 精选：金色描边 = 高亮 */
+.sel-selected { color: var(--gold-500); border-color: rgba(244, 211, 94, 0.42); background: rgba(244, 211, 94, 0.1); }
+/* 最终精选：金色实心 + 皇家蓝文字（Console 的 tag-gold 是场景签名） */
+.sel-final { color: var(--royal-900); border-color: var(--gold-500); background: var(--gold-500); font-weight: 600; }
+.sel-final::before { background: var(--royal-700); }
+
+kbd {
+  display: inline-block;
+  min-width: 20px;
+  padding: 1px 6px;
+  border: 1px solid var(--ink-line);
+  border-bottom-width: 2px;
+  border-radius: var(--r-sm);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-text-2);
+  background: var(--royal-900);
+  text-align: center;
+}
+
+/* ============================================================================
+ * 工作台 · 页头
+ * ========================================================================== */
+.wb-head {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 26px 28px 14px;
+  /* 不裁切：装饰性大字靠自身尺寸控制，裁切会把标题也切掉（踩过） */
+  overflow: visible;
+}
+.wb-eyebrow {
+  margin: 0 0 6px;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.16em;      /* 全大写必须加字距（DNA 字体铁律 6） */
+  text-transform: uppercase;
+  color: var(--gold-500);
+}
+.wb-title {
+  margin: 0;
+  font-family: var(--font-display);
+  /* 精选页的 hero 字号走 `--fs-hero` 令牌（与 `--fs-title` 同族的更大一档）。 */
+  font-size: var(--fs-hero);
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  color: var(--ink-text);
+}
+
+/* 精选页标题上的 `.is-hero` 修饰类 —— 见 phase2.css 顶部"页头"一节说明的
+ * "唯一例外"。⚠️ 这个类曾经**没有任何规则**：精选页标题之所以更大，纯粹是因为
+ * `.wb-title` 在本文件里出现得比 `.view-head-title` **更靠后**，同权重下后来者胜。
+ * 那是一个"没设计过但能用"的依赖 —— 调整这两条规则的顺序就会静默改变字号。
+ * 现在显式声明：`.is-hero` 自己把字号钉在 `--fs-hero` 上，不再依赖源码顺序。 */
+.view-head-title.is-hero {
+  font-size: var(--fs-hero);
+  letter-spacing: -0.02em;
+}
+/* 标题下的金色短线：Console 的"金色装饰线"签名，只出现一次 */
+.wb-title::after {
+  content: '';
+  display: block;
+  width: 44px;
+  height: 2px;
+  margin-top: 8px;
+  background: linear-gradient(90deg, var(--gold-500), rgba(244, 211, 94, 0));
+}
+.wb-sub {
+  margin: 10px 0 0;
+  max-width: 46ch;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--ink-text-2);
+}
+.wb-sub em { font-style: normal; color: var(--ink-text); }
+.wb-sub strong { color: var(--gold-500); font-weight: 600; }
+/* 装饰性大号字符（DNA：opacity 0.06–0.12，不抢内容） */
+.wb-mark {
+  flex: none;
+  font-family: var(--font-display);
+  font-size: clamp(3rem, 7vw, 5rem);
+  font-weight: 700;
+  line-height: 0.8;
+  color: var(--gold-500);
+  opacity: 0.08;
+  user-select: none;
+  pointer-events: none;
+}
+
+/* ============================================================================
+ * 工作台 · 工具栏（Console 的"导航面"：皇家蓝系深色带）
+ * ========================================================================== */
+.wb-toolbar {
+  padding: 0;
+  border: 1px solid var(--ink-divider);
+  border-radius: var(--r-lg);
+  background: linear-gradient(180deg, #0c1730, #0a1226 70%);
+  box-shadow: var(--sh-md);
+  /* ⚠️ 这里**不能** `overflow: hidden` —— 日期弹窗挂在工具栏内部的按钮下面，
+   * 一旦裁切，日历就被切在工具栏底边（第一版就是这样，只露出快捷区间）。
+   * 圆角靠自身 border-radius + 下面那条金线自己的圆角维持。 */
+}
+/* 顶边一条金色细线：整块工具栏的"手作感"签名 */
+.wb-toolbar::before {
+  content: '';
+  display: block;
+  height: 1px;
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
+  background: linear-gradient(90deg, rgba(244, 211, 94, 0.55), rgba(244, 211, 94, 0.06) 45%, transparent);
+}
+.wb-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 14px 16px;
+}
+.wb-row + .wb-row { border-top: 1px solid var(--ink-divider); }
+.wb-row-secondary { align-items: center; padding: 11px 16px; background: rgba(4, 15, 42, 0.35); }
+.wb-scene { flex: 1 1 380px; min-width: 0; }
+.wb-side { flex: 0 1 300px; }
+.wb-grow { flex: 1 1 240px; min-width: 0; }
+
+/* ---------------------------------------------------- 由粗到细的漏斗（.wb-step）
+ *
+ * 一次只显示当前这一层：① 时段 → ② 地点 → ③ 拍摄日期 → ④ 关键词 → ⑤ 选一个场景。
+ * 改之前是四行控件全铺开、而且**最细的 Scene 排第一行** ——
+ * 用户一进来就面对三百多项的下拉，而"地点/日期/关键词"本来就是用来缩小它的。
+ *
+ * 每层一行、左侧一个圈号。`hidden` 由 `review.js::renderStepVisibility()` 控制，
+ * **不重建 DOM**（重建会让正在打字的输入框丢光标）。 */
+.wb-steps { display: flex; flex-direction: column; }
+
+.wb-step {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+}
+.wb-step[hidden] { display: none; }
+.wb-step + .wb-step { border-top: 1px solid var(--ink-divider); }
+
+/* 圈号：序号是**顺序信息**，不是装饰，所以用中性色而不是品牌色 */
+.wb-step-no {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--ink-line);
+  border-radius: 50%;
+  font-size: 12px;
+  color: var(--ink-text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.wb-step-body { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1 1 auto; }
+.wb-step-label {
+  flex: 0 0 var(--wb-label-w);
+  min-width: var(--wb-label-w);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  color: var(--ink-text-3);
+}
+.wb-step-body select,
+.wb-step-body input[type='search'] { flex: 1 1 auto; min-width: 0; max-width: 520px; }
+/* ⚠️ `.wb-step-body` 原来是 `flex: 1 1 auto`（撑满整行），于是「撤掉」的 ×
+ * 被推到整行最右边 —— 离控件 700 多像素，看起来像个不知道干什么的孤立按钮
+ *（用户原话："这里是干啥的，看上去没啥用"）。
+ * 把前三层的 body 宽度**封顶在"标签 + 控件"**，× 就紧跟在控件右侧。 */
+.wb-step[data-step='city'] .wb-step-body,
+.wb-step[data-step='date'] .wb-step-body,
+.wb-step[data-step='keyword'] .wb-step-body {
+  max-width: calc(var(--wb-label-w) + 540px);
+}
+
+/* 撤掉这一层：只在有值时有意义，点它就是回到上一层 */
+.wb-step-clear {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  color: var(--ink-text-3);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  appearance: none;
+}
+.wb-step-clear:hover { color: var(--ink-text); border-color: var(--ink-line); background: var(--wine-a08); }
+.wb-step-clear:focus-visible { outline: none; box-shadow: var(--focus-tight); }
+
+/* 最后一层：上面是"缩小范围"，下面是"决定挑哪个" —— 用一条更明显的分隔线断开，
+   并给它一点底色，让"这是要你做决定的地方"一眼可见。 */
+.wb-step-final {
+  border-top: 1px solid var(--gold-a30) !important;
+  background: var(--gold-a05);
+}
+.wb-step-final .wb-step-no { border-color: var(--gold-a45); color: var(--gold-500); }
+.wb-step-final .wb-step-label { color: var(--ink-text-2); }
+.wb-step-final select { max-width: none; }
+
+/* ------------------------------------------------- 辅助行（阈值 / 时段）
+ *
+ * 与上面的漏斗**共用同一套"标签一列、控件一列"的网格**。
+ *
+ * ⚠️ 改之前这两行用的是 `.wb-field`（**纵向**：标签在上、控件在下），
+ * 而上面几层是横向 —— **两套布局**，标签一长一短时控件的起点必然错开
+ * （实测"相邻时间阈值"宽 92px vs "时段（可选 · 平时不用它筛）"宽 430px，
+ * 用户说"两边对不齐我好难受"）。
+ *
+ * 现在：标签占第一列（`--wb-label-w`），控件一律从同一条竖线开始。
+ * 顺带把那个 13 字的标签缩短成「时段」，解释移到 `title` 里 ——
+ * 标签是**扫视用的**，长句子塞进去只会把网格撑坏。 */
+.wb-rows { flex-direction: column; align-items: stretch; gap: 0; padding: 0; }
+
+/* 辅助行的标签要和上面的漏斗**从同一条竖线开始**。
+   漏斗的每层是 `[圈号 22px][gap 12px][标签 96px][gap 10px][控件]`，
+   所以这里左边补 34px（22+12）—— 不补的话两组差一个圈号的宽度，
+   上下扫视时控件仍然不在一条线上（实测 179 vs 145）。
+   34 = 圈号宽 22 + 漏斗的 gap 12，改那两个值时要一起改。 */
+.wb-field-inline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 11px 16px 11px 50px;
+  min-width: 0;
+}
+.wb-field-inline + .wb-field-inline { border-top: 1px solid var(--ink-divider); }
+.wb-field-inline > .wb-label {
+  flex: 0 0 var(--wb-label-w);
+  width: var(--wb-label-w);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  color: var(--ink-text-3);
+}
+/* 控件不撑满整行 —— 一行里可能有多个（数字框 + 应用 + 预设按钮） */
+.wb-field-inline > input.wb-gap-value { width: 72px; flex: 0 0 auto; }
+.wb-field-inline > select { flex: 1 1 260px; max-width: 520px; min-width: 0; }
+
+/* 表单原语：**所有控件都品牌化**，不留浏览器默认样式（Console P0） */
+.wb-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.wb-field > .wb-label {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  color: var(--ink-text-3);
+}
+#view-review select,
+#view-review input[type='text'],
+#view-review input[type='search'],
+#view-review input[type='number'],
+#view-review input[type='date'],
+#view-collections select,
+#view-collections input {
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid var(--ink-line);
+  border-radius: var(--r-md);
+  background: rgba(4, 15, 42, 0.6);
+  color: var(--ink-text);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  transition: border-color 0.18s cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 0.18s cubic-bezier(0.16, 1, 0.3, 1), background 0.18s;
+  appearance: none;
+}
+#view-review select {
+  padding-right: 34px;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8'><path d='M1 1l5 5 5-5' fill='none' stroke='%237b9ddb' stroke-width='1.6'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+}
+#view-review input::placeholder { color: var(--ink-text-3); }
+#view-review select:hover,
+#view-review input:hover { border-color: var(--royal-300); }
+#view-review select:focus,
+#view-review input:focus {
+  outline: none;
+  border-color: var(--royal-300);
+  box-shadow: var(--focus);          /* 焦点环：皇家蓝光晕（Console P0） */
+  background: rgba(4, 15, 42, 0.85);
+}
+#view-review input:disabled,
+#view-review select:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Scene 主控比其他控件更高一级：字号更大、英文/数字用衬线 */
+.wb-scene select {
+  min-height: 50px;
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  background-color: rgba(10, 36, 99, 0.35);
+  border-color: var(--royal-500);
+}
+.wb-scene select:hover { border-color: var(--royal-300); }
+#review-scene { font-family: var(--font-ui); }
+
+/* 按钮：一个面板只有**一个**皇家蓝实心主按钮（Console P0） */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  /* 高度与输入框/下拉框**同源**（`--control-h`）—— 见 tokens.css。
+     这里原来是 `min-height: 42px`，42 是"行高 + 内边距 + 描边"碰巧算出来的数；
+     而输入框那边是 `min-height: 38px`。两个真源 → 并排时矮 4px。 */
+  height: var(--control-h);
+  box-sizing: border-box;
+  padding: 0 16px;
+  border: 1px solid var(--ink-line);
+  border-radius: var(--r-md);
+  background: rgba(4, 15, 42, 0.5);
+  color: var(--ink-text);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: transform 0.16s cubic-bezier(0.16, 1, 0.3, 1), background 0.16s,
+    border-color 0.16s, box-shadow 0.16s, color 0.16s;
+}
+.btn:hover { border-color: var(--royal-300); background: rgba(30, 77, 170, 0.22); }
+.btn:active { transform: translateY(1px); }
+.btn:focus-visible { outline: none; box-shadow: var(--focus); border-color: var(--royal-300); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+.btn.primary {
+  background: var(--royal-700);
+  border-color: var(--royal-600);
+  color: #fff;
+}
+.btn.primary:hover:not(:disabled) { background: var(--royal-600); border-color: var(--royal-500); }
+.btn.gold {
+  background: transparent;
+  border-color: rgba(244, 211, 94, 0.5);
+  color: var(--gold-500);
+}
+.btn.gold:hover:not(:disabled) { background: rgba(244, 211, 94, 0.12); border-color: var(--gold-500); }
+.btn.danger { border-color: rgba(216, 49, 91, 0.55); color: var(--wine-500); }
+.btn.danger:hover:not(:disabled) { background: rgba(216, 49, 91, 0.12); border-color: var(--wine-600); }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--ink-text-2); }
+.btn.ghost:hover { background: rgba(123, 157, 219, 0.1); border-color: transparent; color: var(--ink-text); }
+.btn.small { min-height: 34px; padding: 0 11px; font-size: 13px; border-radius: var(--r-sm); }
+/* 主流程按钮给到 46px（Console P0 的触摸目标要求 ≥44px，这里略高一点更好按）。
+ * ⚠️ 注释里曾写 44px 而代码是 46px —— 以代码为准，两者都是"达标"。 */
+.btn.mark { min-height: 46px; padding: 0 18px; font-size: 14.5px; }
+
+/* 阈值行 */
+.wb-gap-value { width: 92px; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.gap-preset {
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: var(--r-pill);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+.gap-preset.is-default { border-color: rgba(244, 211, 94, 0.5); color: var(--gold-500); }
+.wb-source {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--ink-text-3);
+}
+
+/* 计数与提示 */
+.wb-count {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-text-2);
+}
+.wb-count b { color: var(--gold-500); font-weight: 600; }
+
+/* 日期按钮：点开是日历弹窗（不是原生 date 输入） */
+.wb-field-pop { position: relative; }
+.wb-date-btn {
+  min-height: 42px;
+  min-width: 210px;
+  justify-content: flex-start;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+.wb-date-btn.is-set { border-color: rgba(244, 211, 94, 0.45); color: var(--gold-500); }
+
+/* ------------------------------------------------------------------ 浮层 */
+/* ⚠️ 浮层必须**锚定在触发它的控件下面**。
+ * 第一版把 `.wb-pop` 放在工具栏末尾、没有任何定位祖先 ——
+ * 绝对定位元素的静态位置就在那里，于是它盖在 KPI 条上（截图里数字压在日历上）。
+ * 现在：日期按钮外面套一个 `position: relative` 的容器，浮层挂在按钮下方。 */
+.wb-pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 60;
+  padding: 14px;
+  border: 1px solid var(--ink-line);
+  border-radius: var(--r-lg);
+  background: var(--ink-panel-2);
+  box-shadow: var(--sh-lg);
+  /* 两个月并排需要足够宽度：`min-width:320px` 会把第二个月份挤到下一行，
+   * 弹窗高度从 ~340px 涨到 ~780px，直接盖住下面的内容（实测）。 */
+  min-width: 560px;
+}
+.wb-pop::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
+  background: linear-gradient(90deg, rgba(244, 211, 94, 0.6), transparent 60%);
+}
+.wb-pop-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.wb-pop-title {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--ink-text);
+}
+.wb-quick { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.wb-quick .btn { min-height: 30px; padding: 0 10px; font-size: 12.5px; border-radius: var(--r-pill); }
+.wb-cal-months { display: flex; gap: 16px; flex-wrap: wrap; }
+.wb-cal { min-width: 232px; }
+.wb-cal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.wb-cal-title {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--ink-text);
+}
+.wb-cal-nav { min-height: 30px; width: 30px; padding: 0; border-radius: var(--r-sm); }
+.wb-cal-weekdays,
+.wb-cal-days {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+.wb-cal-weekdays span {
+  padding: 4px 0;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--ink-text-3);
+}
+.wb-cal-day {
+  min-height: 32px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink-text-2);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background 0.14s, color 0.14s, border-color 0.14s;
+}
+.wb-cal-day:hover { background: rgba(123, 157, 219, 0.14); color: var(--ink-text); }
+.wb-cal-day.is-outside { color: var(--ink-text-3); opacity: 0.45; }
+.wb-cal-day.is-has-data { border-color: rgba(244, 211, 94, 0.28); }
+.wb-cal-day.is-in-range { background: rgba(30, 77, 170, 0.34); color: var(--ink-text); border-radius: 0; }
+.wb-cal-day.is-edge {
+  background: var(--gold-500);
+  border-color: var(--gold-500);
+  color: var(--royal-900);
+  font-weight: 700;
+  border-radius: var(--r-sm);
+}
+.wb-cal-day.is-today { box-shadow: inset 0 0 0 1px var(--royal-300); }
+.wb-cal-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--ink-divider);
+}
+
+/* ============================================================================
+ * 工作台 · KPI 条（进度 + 四态计数 + 计时）
+ * ========================================================================== */
+.wb-kpis { margin-top: var(--flow); }
+.review-summary {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  flex-wrap: wrap;
+  padding: 14px 18px;
+  border: 1px solid var(--ink-divider);
+  border-radius: var(--r-lg);
+  background: var(--ink-panel);
+  box-shadow: var(--sh-sm);
+}
+.kpi-title-wrap { min-width: 0; }
+.kpi-city {
+  display: block;
+  font-family: var(--font-display);
+  /* 与 `.view-head-title.is-hero` 同一档：都是"这一场拍摄的名字"级别的衬线大字 */
+  font-size: var(--fs-hero);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--ink-text);
+}
+.kpi-when {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-text-3);
+}
+.kpi-progress { flex: 1 1 190px; min-width: 160px; }
+.kpi-bar {
+  height: 6px;
+  border-radius: var(--r-pill);
+  background: var(--royal-800);
+  overflow: hidden;
+}
+.kpi-bar > i {
+  display: block;
+  height: 100%;
+  border-radius: var(--r-pill);
+  background: linear-gradient(90deg, var(--gold-600), var(--gold-500));
+  transition: width 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.kpi-bar-label {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 5px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-text-3);
+}
+.kpi-stats { display: flex; gap: 18px; flex-wrap: wrap; }
+.kpi-stat { display: flex; flex-direction: column; gap: 2px; min-width: 62px; }
+.kpi-stat > b {
+  font-family: var(--font-display);
+  /* KPI 大数字走 `--fs-kpi`（此前硬编码 21px，改了令牌不生效） */
+  font-size: var(--fs-kpi);
+  font-weight: 700;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-text);
+}
+.kpi-stat > span {
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  color: var(--ink-text-3);
+}
+.kpi-stat.is-final > b { color: var(--gold-500); }
+.kpi-stat.is-selected > b { color: var(--gold-400); }
+.kpi-stat.is-candidate > b { color: var(--royal-300); }
+.kpi-meta {
+  margin-left: auto;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-text-3);
+}
+.review-summary .muted { color: var(--ink-text-2); font-size: 13px; }
+
+/* 空状态：有引导、有下一步（Console P1）
+ *
+ * ★ 这是**全应用唯一**的空态组件（12 处调用）。2026-10-14 之前还有
+ * `.people-empty` 与 `.search-empty` 两个"长得差不多但不一样"的版本，
+ * 以及五句不同的加载文案 —— 同一个状态在不同页面上长得不一样，
+ * 用户会以为是两种东西。
+ *
+ * ## 两种安放方式（改前混用成"卡中卡"）
+ *
+ * 这个组件**自带边框**，于是当它被塞进一个已经有边框的面板里时
+ * （`#review-viewer` 是 `.panel`，空态又画一圈边），屏幕上出现两层同色方框，
+ * 看起来像没加载完的占位。现在按安放位置分两态：
+ *   · **独立**（直接放在视图里）→ 自带边框与底色，是一块完整的空态卡；
+ *   · **内嵌**（在 `.panel` / `.wb-modal-body` 里）→ 去掉边框与底色，只留内容。
+ */
+.wb-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 30px 20px;
+  text-align: center;
+  border: 1px solid var(--ink-divider);
+  border-radius: var(--r-lg);
+  background: var(--ink-panel);
+}
+
+/* 内嵌态：被带边框的容器包着时不要再画一层框 */
+.panel > .wb-empty,
+.wb-modal-body > .wb-empty,
+.review-main > .wb-empty,
+.review-side > .wb-empty,
+.person-section > .wb-empty {
+  border: none;
+  background: transparent;
+  border-radius: 0;
+  padding: 22px 16px;
+}
+
+.wb-empty .fleuron { font-size: 22px; color: var(--gold-500); opacity: 0.75; }
+.wb-empty p { margin: 0; max-width: 60ch; font-size: var(--fs-md); line-height: 1.7; color: var(--ink-text-2); }
+.wb-empty p strong { color: var(--ink-text); }
+.wb-empty code {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  padding: 2px 7px;
+  border-radius: var(--r-sm);
+  background: var(--royal-900);
+  color: var(--gold-400);
+}
+
+/* 加载态 = 空态的变体：同一个壳子，靠呼吸的 fleuron 表示"还在跑"。
+   没有转圈的 gif、没有骨架屏 —— 本地服务通常几百毫秒就回来，
+   真正需要看进度的地方（后台任务）本来就有一条带百分比的进度条。 */
+.wb-empty.is-loading {
+  padding: 22px 20px;
+  color: var(--ink-text-3);
+}
+.wb-empty.is-loading .fleuron {
+  animation: photoos-breathe 1.5s ease-in-out infinite;
+}
+.wb-empty.is-loading p { font-size: 13px; color: var(--ink-text-3); }
+@keyframes photoos-breathe {
+  0%, 100% { opacity: 0.25; transform: scale(0.94); }
+  50% { opacity: 0.9; transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wb-empty.is-loading .fleuron { animation: none; opacity: 0.7; }
+}
+
+/* 失败态 = 空态的另一个变体。**留得住**是它存在的理由：
+   以前失败一律走 toast，六秒就没了，用户回来只看到一块空的地方，
+   分不清"失败了"和"本来就没有"。
+   酒红只用在 fleuron 与左边框上 —— 一屏 ≤2 处，不做大面积红底。 */
+.wb-empty.is-error {
+  border-color: var(--wine-a40);
+  background: var(--wine-a08);
+}
+.wb-empty.is-error .fleuron { color: var(--wine-400); opacity: 0.9; }
+.wb-empty.is-error p strong { color: var(--ink-text); }
+.wb-empty.is-error .hint { color: var(--ink-text-3); }
+.wb-empty.is-error .btn { margin-top: 2px; }
+
+/* ============================================================================
+ * 工作台 · 主体两栏
+ * ========================================================================== */
+.review-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: var(--flow);
+  padding: var(--flow) var(--gutter) 0;
+}
+@media (max-width: 1100px) {
+  .review-layout { grid-template-columns: 1fr; }
+}
+.review-main {
+  display: flex;
+  flex-direction: column;
+  min-height: 420px;
+  border: 1px solid var(--ink-divider);
+  border-radius: var(--r-lg);
+  background: var(--ink-panel);
+  box-shadow: var(--sh-sm);
+  overflow: hidden;
+}
+
+/* 查看器 */
+.viewer-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--ink-divider);
+  background: rgba(4, 15, 42, 0.35);
+}
+.viewer-head .spacer { flex: 1; }
+.viewer-name {
+  font-family: var(--font-mono);
+  font-size: 13.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-text);
+  letter-spacing: 0.01em;
+}
+.viewer-head .muted { font-size: 12.5px; color: var(--ink-text-3); font-variant-numeric: tabular-nums; }
+.viewer-stage {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  min-height: 340px;
+  background:
+    radial-gradient(circle at 50% 40%, rgba(30, 77, 170, 0.14), transparent 62%),
+    var(--ink-stage);              /* 照片舞台：比面板更深，让照片自己发光 */
+}
+.viewer-stage img {
+  max-width: 100%;
+  max-height: 62vh;
+  border-radius: var(--r-md);
+  box-shadow: 0 18px 42px rgba(4, 15, 42, 0.75);
+}
+.viewer-meta {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 10px 16px 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-text-3);
+}
+.viewer-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 14px 16px 16px;
+}
+/* 查看器里的提示条：与 app.css 的 `.notice` 同一套（琥珀淡底 + 1px 琥珀边）。
+ * 同样**不用**左侧 3px 竖条 —— 见 app.css 里对那条取舍的说明。 */
+.notice {
+  margin: 10px 16px 0;
+  padding: 9px 12px 9px 14px;
+  border: 1px solid rgba(230, 162, 60, 0.38);
+  border-radius: var(--r-sm);
+  background: rgba(230, 162, 60, 0.1);
+  color: var(--gold-200);
+  font-size: var(--fs-base);
+  line-height: 1.6;
+}
+
+/* 比较视图 */
+.compare-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--ink-divider);
+  font-size: 13.5px;
+  color: var(--ink-text);
+}
+.compare-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+  padding: 16px;
+}
+.compare-card {
+  margin: 0;
+  border: 1px solid var(--ink-line);
+  border-radius: var(--r-md);
+  background: var(--ink-panel-2);
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color 0.18s, box-shadow 0.18s, transform 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.compare-card:hover { transform: translateY(-1px); border-color: var(--royal-300); }
+.compare-card.is-current {
+  border-color: var(--gold-500);
+  box-shadow: var(--sh-gold);
+}
+.compare-card img { display: block; width: 100%; aspect-ratio: 3 / 2; object-fit: contain; background: var(--ink-stage); }
+.compare-card figcaption {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+}
+.cmp-name { font-family: var(--font-mono); font-size: 12px; color: var(--ink-text); }
+.cmp-when { font-family: var(--font-mono); font-size: 11px; color: var(--ink-text-3); }
+.cmp-reason { font-size: 11.5px; color: var(--gold-400); }
+.cmp-actions { display: flex; gap: 6px; padding: 0 10px 10px; }
+
+/* ============================================================================
+ * 工作台 · 相似组侧栏
+ * ========================================================================== */
+.review-side {
+  border: 1px solid var(--ink-divider);
+  border-radius: var(--r-lg);
+  background: var(--ink-panel);
+  box-shadow: var(--sh-sm);
+  padding: 14px 14px 16px;
+  max-height: 76vh;
+  overflow: auto;
+}
+.wb-side-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.wb-side-head h2 {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink-text);
+}
+.wb-side-tag {
+  padding: 1px 8px;
+  border: 1px solid rgba(244, 211, 94, 0.4);
+  border-radius: var(--r-pill);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--gold-500);
+}
+.review-side .hint { font-size: 12.5px; line-height: 1.65; color: var(--ink-text-3); margin: 6px 0; }
+.review-groups { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+/* `hidden` 必须能真的藏住它 —— 上面的 display:flex 会盖掉 UA 的 [hidden] 规则 */
+.review-groups[hidden] { display: none; }
+.grp {
+  position: relative;
+  padding: 9px 10px 10px 13px;
+  border: 1px solid var(--ink-divider);
+  border-radius: var(--r-md);
+  background: var(--ink-panel-2);
+  transition: border-color 0.18s, background 0.18s;
+}
+.grp:hover { border-color: var(--ink-line); }
+/* 当前组：金色描边 + 同色系淡底。
+ *
+ * 这里原来是一条绝对定位的 3px 金色竖条 —— 视觉上就是"卡片左侧色条"，
+ * 是本项目最容易被认出来的 AI 生成痕迹之一。品牌签名（金 = 当前项）
+ * 靠**描边 + 淡底**同样成立，而且与 `.collection-card.is-active`、
+ * `.person-card.is-active`、`.library-card.is-active` 完全同构：
+ * 全应用"当前项"只有一种画法。 */
+.grp.is-active {
+  border-color: var(--gold-a45);
+  background: var(--gold-a05);
+}
+.grp-head { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
+.grp-title {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-text-2);
+  letter-spacing: 0.02em;
+}
+.grp-tag {
+  padding: 0 7px;
+  border: 1px solid rgba(244, 211, 94, 0.4);
+  border-radius: var(--r-pill);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  color: var(--gold-500);
+}
+.grp-thumbs { display: flex; flex-wrap: wrap; gap: 5px; }
+.grp-thumb {
+  position: relative;
+  width: 50px;
+  height: 50px;
+  padding: 0;
+  border: 1px solid var(--ink-line);
+  border-radius: var(--r-sm);
+  background: var(--ink-stage);
+  cursor: pointer;
+  overflow: hidden;
+  transition: border-color 0.16s, box-shadow 0.16s, transform 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.grp-thumb:hover { transform: translateY(-1px); border-color: var(--royal-300); }
+.grp-thumb.is-current { border-color: var(--gold-500); box-shadow: 0 0 0 1px var(--gold-500); }
+.grp-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* 「这一组还有 N 张没铺在这里」。
+ * 以前是直接 `slice(0, 6)` 静默丢弃 —— 用户既不知道有更多，
+ * 走到被丢掉的那几张时侧栏里连"当前项"都没有（见 js/review.js 的 thumbsToShow）。
+ * 现在如实标出来，并提示用 ← → 逐张看。 */
+.grp-more {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 50px;
+  height: 50px;
+  padding: 0 8px;
+  border: 1px dashed var(--ink-line);
+  border-radius: var(--r-sm);
+  color: var(--ink-text-3);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.grp-dot {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: 1px solid rgba(7, 9, 15, 0.85);
+  background: var(--ink-text-3);
+}
+.grp-dot.sel-unreviewed { background: #4a5268; }
+.grp-dot.sel-candidate { background: var(--royal-400); }
+.grp-dot.sel-selected { background: var(--gold-600); }
+.grp-dot.sel-final { background: var(--gold-500); }
+
+/* ============================================================================
+ * 工作台 · 调整分组面板 + 快捷键面板
+ * ========================================================================== */
+#review-adjust-panel,
+#review-help-panel {
+  margin-top: var(--flow);
+  border: 1px solid var(--ink-divider);
+  border-radius: var(--r-lg);
+  background: var(--ink-panel);
+  box-shadow: var(--sh-sm);
+  padding: var(--sp-5);
+}
+#review-adjust-panel .panel-head,
+#review-help-panel .panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.panel-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.adjust-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 10px; }
+.adjust-row {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid var(--ink-divider);
+  border-radius: var(--r-md);
+  background: var(--ink-panel-2);
+  cursor: pointer;
+  transition: border-color 0.16s, background 0.16s;
+}
+.adjust-row:hover { border-color: var(--royal-300); }
+.adjust-row.picked { border-color: var(--gold-500); background: rgba(244, 211, 94, 0.07); }
+.adjust-row img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: var(--r-sm); display: block; }
+.adjust-row input { position: absolute; top: 10px; left: 10px; width: 16px; height: 16px; accent-color: var(--gold-500); }
+.adjust-name { font-family: var(--font-mono); font-size: 11px; color: var(--ink-text-3); }
+
+/* ============================================================================
+ * 主题（Collections）
+ * ========================================================================== */
+/* 底色与径向微光已统一在 tokens.css 的 body 上 —— 原来只有这一页和精选页
+ * 有那层光，其余五页是平涂，同一个应用两种底。这里不再重复定义。 */
+#view-collections .panel {
+  border: 1px solid var(--ink-divider);
+  border-radius: var(--r-lg);
+  background: var(--ink-panel);
+  box-shadow: var(--sh-sm);
+}
+#view-collections .hint { color: var(--ink-text-2); }
+.collections-layout {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: 14px;
+  margin-top: 14px;
+}
+@media (max-width: 1000px) { .collections-layout { grid-template-columns: 1fr; } }
+.collections-list { display: flex; flex-direction: column; gap: 8px; }
+.collection-card {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--ink-divider);
+  border-radius: var(--r-md);
+  background: var(--ink-panel-2);
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  transition: border-color 0.16s, background 0.16s, transform 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.collection-card:hover { transform: translateY(-1px); border-color: var(--royal-300); }
+.collection-card.is-active { border-color: rgba(244, 211, 94, 0.45); background: rgba(244, 211, 94, 0.06); }
+.collection-card.is-active .collection-name::after {
+  content: '';
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--gold-500);
+  vertical-align: middle;
+}
+.collection-cover {
+  width: 58px;
+  height: 58px;
+  flex: none;
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  background: var(--ink-stage);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.collection-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.collection-cover-empty { font-size: 10px; color: var(--ink-text-3); }
+.collection-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.collection-name { font-size: 14.5px; font-weight: 500; color: var(--ink-text); }
+.collection-sub { font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-text-3); }
+.collections-detail { min-width: 0; }
+.collections-detail .hint { font-size: 13.5px; line-height: 1.7; }
+.collection-items { margin-top: 12px; }
+/* 成员排成**缩略图网格**。改之前是一行行 46×46 的小图 + 文字 ——
+   一个主题 63 张时那一列小图没法浏览（用户报的"可读性太差"）。
+   现在每张给一块能看清的图，顺序/时刻/精选状态/文件名/四个动作都还在。 */
+.collection-items {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(184px, 1fr));
+  gap: 10px;
+}
+.ci-card {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  border: 1px solid var(--ink-divider);
+  border-radius: var(--r-md);
+  background: var(--ink-panel-2);
+  overflow: hidden;
+  transition: border-color 0.16s, background 0.16s;
+}
+.ci-card:hover { border-color: var(--royal-300); }
+.ci-card[draggable='true'] { cursor: grab; }
+.ci-card[draggable='true']:active { cursor: grabbing; }
+
+/* 图就是原片入口：点它打开照片详情（与全应用"点图看原片"一致）。
+   没缩略图时 `disabled`，不给一个点了没反应的假入口。 */
+.ci-shot {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  border-bottom: 1px solid var(--ink-divider);
+  background: var(--ink-stage);
+  cursor: pointer;
+  appearance: none;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+}
+.ci-shot:disabled { cursor: default; display: grid; place-items: center; }
+.ci-shot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ci-shot:focus-visible { outline: none; box-shadow: var(--focus-tight); }
+
+/* 序号：**顺序是这个功能的核心**（主题是有序的作品集），所以给它金色 ——
+   金色在本应用专表"你的选择/当前项"，而顺序正是用户自己排的。 */
+.ci-order {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--gold-500);
+  font-weight: 600;
+}
+.ci-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 7px 8px 4px;
+  min-width: 0;
+  flex: 1;
+}
+.ci-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.ci-line .ci-sub { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ci-line .sel-badge { flex: 0 0 auto; }
+/* ⚠️ 这里曾有一条 `.ci-name`：主题成员的文件名原本是**死的文本**，
+   用户看到一张照片却打不开它。现在文件名走 `js/cards.js` 的 `fileBlock()`，
+   用全应用统一的 `.card-file / .card-open / .card-name`（定义在 app.css）——
+   既拿到了"点文件名＝看原片"，也和其他九处卡片长得一样。
+   网格里空间紧，所以把 `fileBlock` 里的"看原片"提示藏掉（图本身就是入口，
+   文件名是给键盘与精确点击留的第二条路）。 */
+.ci-meta .card-file { margin-top: 2px; padding-top: 4px; }
+.ci-meta .card-dir { display: none; }
+.ci-meta .card-cue { display: none; }
+.ci-sub { font-family: var(--font-mono); font-size: 11px; color: var(--ink-text-3); font-variant-numeric: tabular-nums; }
+.ci-note { font-size: 11.5px; color: var(--gold-400); }
+.ci-actions {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  padding: 0 8px 8px;
+  margin-top: auto;
+}
+.ci-actions .btn.small { padding: 1px 7px; font-size: var(--fs-2xs); }
+
+/* ============================================================================
+ * 「添加照片」对话框（主题页）：三个来源 —— 我的精选 / 物理目录 / 已有主题
+ * ========================================================================== */
+.wb-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+  background: rgba(4, 15, 42, 0.74);
+}
+/* ⚠️⚠️ 这一行是**必须**的，不是可选的清理。
+ *
+ * `.wb-modal` 设了 `display: flex`，而 HTML 的 `hidden` 属性只靠 UA 样式表的
+ * `[hidden] { display: none }` 生效 —— **作者样式优先于 UA 样式**，
+ * 于是带 `hidden` 的对话框仍然是 `display:flex`：
+ * 一层 74% 不透明度的全屏遮罩**看不见地盖住整页**，
+ * 把真实用户的每一次鼠标点击都吃掉。
+ *
+ * 这个 bug 本轮的自动化测试**没抓到**，因为脚本用的是 `element.click()`
+ * （直接派发事件，不做命中测试）；是我用 `document.elementFromPoint()`
+ * 去查另一个问题时撞见的。所以现在有两条专门的断言守着它（见
+ * `verify_picker_fix_live.py` 的 "hidden 元素必须真的 display:none"）。 */
+.wb-modal[hidden] { display: none; }
+.wb-modal-card {
+  display: flex;
+  flex-direction: column;
+  width: min(1120px, 100%);
+  max-height: 100%;
+  border: 1px solid var(--ink-line);
+  border-radius: var(--r-xl);         /* 大容器用大圆角（半径分级） */
+  background: var(--ink-panel);
+  box-shadow: var(--sh-lg);
+  overflow: hidden;
+}
+.wb-modal-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--ink-divider);
+  background: linear-gradient(180deg, #0c1730, #0a1226);
+}
+.wb-modal-head h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--ink-text);
+}
+.wb-modal-head .wb-modal-sub { font-size: 12.5px; color: var(--ink-text-3); }
+/* 「关闭」对齐的是**下拉框**，不是"标签 + 下拉"整块的中心 ——
+ * 头部是 `align-items: center`，所以按钮会浮在字段块中间，看起来比下拉低/高半格。
+ * 这里把它按底对齐，并给一个和下拉同高的可见边框（原来像一行裸文字）。 */
+/* 关闭：卡片右上角的图标按钮（不放流内 —— 流水线里的对齐永远差半格）。
+ * 头部右侧留 56px，保证「目标主题」下拉不会被压住。 */
+.wb-modal-card { position: relative; }
+.wb-modal-head { padding-right: 56px; }
+.wb-modal-x {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink-text-3);
+  cursor: pointer;
+  transition: color 0.16s, border-color 0.16s, background 0.16s;
+}
+.wb-modal-x:hover { color: var(--ink-text); border-color: var(--ink-divider); background: var(--ink-panel-2); }
+.wb-modal-x:focus-visible { outline: none; box-shadow: var(--focus-tight); }
+.wb-modal-tabs { display: flex; gap: 4px; padding: 12px 18px 0; }
+.wb-tab {
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: var(--r-md) var(--r-md) 0 0;
+  background: transparent;
+  color: var(--ink-text-3);
+  font-family: var(--font-ui);
+  font-size: 13.5px;
+  cursor: pointer;
+  transition: color 0.16s, background 0.16s;
+}
+.wb-tab:hover { color: var(--ink-text); background: rgba(123, 157, 219, 0.08); }
+.wb-tab.is-active {
+  color: var(--gold-500);
+  background: var(--ink-panel-2);
+  border-color: var(--ink-divider);
+  box-shadow: inset 0 2px 0 var(--gold-500);
+}
+.wb-modal-body { display: flex; flex-direction: column; gap: 12px; padding: 14px 18px; overflow: auto; }
+.wb-source-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px;
+  border: 1px solid var(--ink-divider);
+  border-radius: var(--r-md);
+  background: var(--ink-panel-2);
+}
+/* 行尾说明：靠右收边，并抬到与下拉里文字同一条基线
+ *（原来紧贴第二个下拉、右边留一大块空，看着像没对齐）。 */
+.wb-source-row > .wb-count {
+  margin-left: auto;
+  align-self: flex-end;
+  margin-bottom: 9px;
+}
+.wb-pick-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+  gap: 8px;
+}
+/* 「已选」条：跨来源可见（预勾选的当前这张可能不在列表里） */
+.wb-picked-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border: 1px solid rgba(244, 211, 94, 0.28);
+  border-radius: var(--r-md);
+  background: rgba(244, 211, 94, 0.05);
+}
+.wb-picked-strip .wb-label { flex: none; color: var(--gold-500); }
+.wb-picked-chips { display: flex; gap: 10px; flex-wrap: wrap; padding: 5px 5px 0 0; }
+.wb-chip {
+  position: relative;
+  width: 58px;
+  height: 46px;
+  border: 1px solid var(--gold-500);
+  border-radius: var(--r-sm);
+  /* ⚠️ 原来是 hidden：× 压在图片右上角里，既挡内容又看不清。
+   * 现在让它**溢出到角外**，图片干净、按钮有独立命中区。 */
+  overflow: visible;
+  background: var(--ink-stage);
+}
+.wb-chip img { border-radius: calc(var(--r-sm) - 1px); }
+.wb-chip img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.wb-chip > b {
+  position: absolute;
+  left: 3px;
+  bottom: 1px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--gold-500);
+  text-shadow: 0 1px 2px rgba(4, 15, 42, 0.9);
+}
+.wb-chip-x {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  width: 18px;
+  height: 18px;
+  line-height: 1;
+  padding: 0;
+  border: none;
+  border-radius: var(--r-sm);
+  background: rgba(4, 15, 42, 0.75);
+  color: var(--ink-text-2);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+.wb-chip-x:hover { background: var(--wine-600); color: #fff; }
+.wb-pick {
+  position: relative;
+  padding: 0;
+  border: 1px solid var(--ink-line);
+  border-radius: var(--r-md);
+  background: var(--ink-stage);
+  cursor: pointer;
+  overflow: hidden;
+  transition: border-color 0.16s, box-shadow 0.16s, transform 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.wb-pick:hover { transform: translateY(-1px); border-color: var(--royal-300); }
+.wb-pick img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; }
+.wb-pick-cap {
+  /* ⚠️ 卡片只有约 127px 宽：时间和状态并排时两边都会**各自折行**
+   *（"10-09 / 17:43" + "最终精 / 选"），看上去像排版坏了。
+   * 改成**两行**、各自不折行：第一行时间，第二行状态。 */
+  display: grid;
+  gap: 2px;
+  padding: 5px 7px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.25;
+  color: var(--ink-text-3);
+  background: var(--ink-panel-2);
+  white-space: nowrap;
+}
+.wb-pick-cap > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 状态是你自己的判断 → 金色；"已在"不是判断，保持灰 */
+.wb-pick-cap > span:last-child { color: var(--gold-400); }
+.wb-pick-cap > span:last-child:not(:first-child) { letter-spacing: 0.02em; }
+.wb-pick.is-picked { border-color: var(--gold-500); box-shadow: 0 0 0 1px var(--gold-500); }
+.wb-pick.is-picked::after {
+  content: attr(data-order);
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  min-width: 20px;
+  padding: 1px 5px;
+  border-radius: var(--r-pill);
+  background: var(--gold-500);
+  color: var(--royal-900);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+}
+.wb-modal-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  border-top: 1px solid var(--ink-divider);
+  background: rgba(4, 15, 42, 0.4);
+}
+.wb-modal-foot .spacer { flex: 1; }
+.wb-picked-note { font-family: var(--font-mono); font-size: 12.5px; color: var(--gold-500); }
+
+/* ============================================================================
+ * 「照抄这条命令」代码块（跨视图共用）
+ *
+ * 三个地方要贴一条**让用户复制去终端执行**的命令：找照片（未准备的搜索词）、
+ * 人物（缺 cv2 时的 detect/embed）、说明页（命令行示例）。它们曾经各写一遍，
+ * 于是同一个组件在三个文件里有三份声明，其中两份的换行行为是错的。
+ *
+ * ## 换行为什么必须这样写
+ *
+ * 命令里含解释器的**绝对路径**（`C:\PhotoOS\venv\Scripts\python.exe -m …`），
+ * 在窄屏上很长。原来的 `white-space: pre-wrap` + `word-break: break-all` 会把它
+ * **硬切成好几段**，缩进全丢 —— 用户复制走的是半条命令（实测 345px 手机上就是
+ * 截图里那样）。而且这几处的元素 HTML 里都带着 `hint` 类，`.hint` 是正文排版，
+ * 所以 `white-space` 必须在这一条里显式压回去。
+ *
+ * 正确形状：`pre`（保留原始空白与缩进）+ 自己横向滚动 + 不在路径中间断词。
+ * 三者缺一都会退化成那个样子。
+ * ========================================================================== */
+.cmd-block {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  line-height: 1.7;
+  color: var(--ink-text);
+  background: var(--royal-900);
+  border: 1px solid var(--ink-line);
+  border-radius: var(--r-sm);
+  padding: 10px var(--sp-4);
+  margin: 10px 0;
+  white-space: pre;
+  word-break: normal;
+  overflow-wrap: normal;
+  overflow-x: auto;
+  max-width: 100%;
+  text-align: left;
+  /* 允许整块选中，方便一次复制走 */
+  user-select: all;
+}
+
+/* 兼容别名：三个历史类名继续生效（它们仍在 JS 里被使用，见 search.js /
+ * people.js / help.js）。⚠️ 新代码请直接用 `.cmd-block`。
+ * 这里用**选择器组**而不是复制声明 —— 复制就是"同一个组件多份声明"，
+ * 而这一条的存在理由正是消灭那件事（它造成过一个只在其中两处修好的缺陷）。 */
+.search-cmd,
+.people-cmd,
+.help-cli {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  line-height: 1.7;
+  color: var(--ink-text);
+  background: var(--royal-900);
+  border: 1px solid var(--ink-line);
+  border-radius: var(--r-sm);
+  padding: 10px var(--sp-4);
+  margin: 10px 0;
+  white-space: pre;
+  word-break: normal;
+  overflow-wrap: normal;
+  overflow-x: auto;
+  max-width: 100%;
+  text-align: left;
+}
+.search-cmd { user-select: text; }
+.people-cmd { user-select: all; }
+
+/* 已删除：`.inline-panel` / `.picker-row` 这一族（2026-10-14）。
+ * 它们是"工作台里内嵌一个选择面板"时代的样式，后来被 js/pick_modal.js
+ * 的模态框取代，代码里已经**一处引用都没有**。留着只会让人误以为还能用。 */
+
+/* ============================================================================
+ * 界面直跑命令（actions）—— 找照片 / 人物 / 维护三处共用
+ *
+ * 视觉上要解决的是"这是一条**会真的在机器上跑**的命令"这件事：
+ * 命令原文必须看得见（用户要能复核自己要跑什么），依赖缺口必须提前说，
+ * 耗时命令必须提前打招呼。所以每一行都是「标签 + 说明 + 命令原文 + 执行」。
+ * ========================================================================== */
+.act-panel {
+  width: min(920px, 96vw);
+  height: auto;
+  max-height: min(860px, 92vh);
+}
+.act-body {
+  padding: var(--sp-5) var(--sp-6) var(--sp-6);
+  overflow: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+}
+
+/* 环境说明条：回答"这条命令到底在哪个 python 里跑"。
+ * 这是排查一切 AI 问题的第一个问题，所以放在最上面、且用等宽字显示路径。 */
+.act-env {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-4);
+  border: 1px solid var(--royal-600);
+  border-radius: var(--r-md);
+  background: var(--royal-a06);
+}
+.act-env-label {
+  font-family: var(--font-ui);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--gold-500);
+}
+.act-env code {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  color: var(--ink-text);
+  background: none;
+  border: none;
+  padding: 0;
+  word-break: break-all;
+}
+.act-env-reason { font-size: var(--fs-sm); color: var(--ink-text-2); }
+.act-env-missing { font-size: var(--fs-sm); color: var(--warn); line-height: 1.6; }
+.act-env-ok { font-size: var(--fs-sm); color: var(--ok); }
+
+.act-group { display: flex; flex-direction: column; gap: var(--sp-3); }
+.act-group-title {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-text-3);
+}
+
+/* 一行 = 一条命令。信息在左、动作在右；窄屏时纵向堆叠（命令原文会很长）。 */
+.act-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-4);
+  padding: var(--sp-4);
+  border: 1px solid var(--ink-divider);
+  border-radius: var(--r-md);
+  background: var(--ink-panel-2);
+}
+.act-row:hover { border-color: var(--ink-line); }
+.act-info { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
+.act-label {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  font-family: var(--font-ui);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--ink-text);
+}
+.act-desc { font-size: var(--fs-sm); line-height: 1.6; color: var(--ink-text-2); }
+/* 命令原文：允许横向滚动，不在路径中间断行（否则用户复制走的是半条命令） */
+.act-cmd {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  line-height: 1.6;
+  color: var(--ink-text-3);
+  background: var(--royal-900);
+  border: 1px solid var(--ink-divider);
+  border-radius: var(--r-sm);
+  padding: 4px 8px;
+  white-space: pre;
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.act-badge {
+  padding: 0 7px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--ink-line);
+  font-family: var(--font-ui);
+  font-size: var(--fs-2xs);
+  font-weight: 500;
+  line-height: 16px;
+  color: var(--ink-text-3);
+}
+/* 耗时 = 琥珀（语义警告位），不是金色 —— 金在本项目里表示"你的选择" */
+.act-badge.is-long { color: var(--warn); border-color: var(--warn-line); }
+.act-badge.is-missing { color: var(--wine-400); border-color: var(--wine-a40); }
+
+.act-run { flex: 0 0 auto; min-width: 76px; }
+
+@media (max-width: 760px) {
+  .act-row { flex-direction: column; }
+  .act-run { width: 100%; }
+}
+
+/* 「这个词没准备过」空态里的动作区：主按钮 + 次要入口 + 可折叠的手动命令。
+ * 手动命令默认**收起来** —— 有按钮之后，命令行是"想自己动手"的人的备选，
+ * 不再该占着空态的正中间。 */
+.not-ready-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  justify-content: center;
+  margin: var(--sp-2) 0;
+}
+.not-ready-manual {
+  width: 100%;
+  max-width: 100%;
+  text-align: left;
+  margin-top: var(--sp-2);
+}
+.not-ready-manual > summary {
+  cursor: pointer;
+  font-family: var(--font-ui);
+  font-size: var(--fs-sm);
+  color: var(--ink-text-2);
+  padding: 4px 0;
+  list-style: none;
+}
+.not-ready-manual > summary::-webkit-details-marker { display: none; }
+.not-ready-manual > summary::before {
+  content: '▸';
+  display: inline-block;
+  width: 14px;
+  color: var(--ink-text-3);
+}
+.not-ready-manual[open] > summary::before { content: '▾'; }
+.not-ready-manual > summary:hover { color: var(--gold-500); }
+
+/* ------------------------------------------------------------------ 运行进度
+ *
+ * 命令在跑的时候的实时面板。两种进度共用一条轨道：
+ *   · 认得出 `123/456` 或 `(40%)` → 确定进度，金色填充；
+ *   · 认不出 → 不确定进度，金色条来回流动 + 已输出行数。
+ * 后者不是"假装有进度"：它如实表达"在跑、还在出东西"，比一条静止的 0% 空条诚实。
+ * 颜色沿用"进行中 = 皇家蓝轨道 + 金色填充"（与后台任务那条进度条一致）。 */
+.run-progress {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  width: 100%;
+  max-width: 72ch;
+  padding: var(--sp-4);
+  border: 1px solid var(--ink-line);
+  border-radius: var(--r-md);
+  background: var(--ink-panel-2);
+  text-align: left;
+}
+.run-progress-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+}
+.run-progress-title { font-size: var(--fs-base); font-weight: 600; color: var(--ink-text); }
+.run-progress-meta {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-text-2);
+}
+
+.run-progress-bar {
+  position: relative;
+  height: 6px;
+  border-radius: var(--r-pill);
+  background: var(--royal-800);
+  overflow: hidden;
+}
+.run-progress-bar > i {
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: var(--r-pill);
+  background: linear-gradient(90deg, var(--gold-600), var(--gold-500));
+  transition: width var(--dur-slow) var(--ease);
+}
+/* 不确定进度：一条同样宽度的光带往复滑动 */
+.run-progress-bar:not(.is-determinate) > i {
+  width: 34%;
+  animation: photoos-run-slide 1.25s ease-in-out infinite;
+}
+.run-progress-bar.is-failed > i { background: var(--wine-600); }
+@keyframes photoos-run-slide {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(295%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  /* 关掉动画时给一条静态的可见条，而不是留一片空白 */
+  .run-progress-bar:not(.is-determinate) > i {
+    animation: none;
+    width: 100%;
+    opacity: 0.45;
+  }
+}
+
+.run-progress-cmd {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  line-height: 1.6;
+  color: var(--ink-text-3);
+  background: var(--royal-900);
+  border: 1px solid var(--ink-divider);
+  border-radius: var(--r-sm);
+  padding: 4px 8px;
+  white-space: pre;
+  overflow-x: auto;
+}
+/* 最近几行输出：用户判断"是不是卡住了"的唯一依据，所以给等宽 + 限高滚动 */
+.run-progress-tail {
+  margin: 0;
+  max-height: 8.5em;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  line-height: 1.6;
+  color: var(--ink-text-2);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.run-progress-tail:empty { display: none; }
+
+.not-ready-progress:empty { display: none; }
+.not-ready-progress { width: 100%; display: flex; justify-content: center; }
+
+
+/* 精选页空态：一行标题 + 一行计数（不写说明，不教操作） */
+.wb-empty-title {
+  margin: 0 0 4px;
+  font-family: var(--font-display);
+  font-size: var(--fs-lg);
+  color: var(--ink-text);
+}
+.wb-empty-count {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--ink-text-2);
+  letter-spacing: 0.02em;
+}
+
+/* 空态时的观看区：把两行字**垂直居中**（否则贴顶、下面一大片空）。
+ * 只在该面板里确实只有空态时才生效，有照片时布局不变。 */
+.review-main:has(.wb-empty) {
+  display: grid;
+  place-content: center;
+  min-height: 340px;
+}

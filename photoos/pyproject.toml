@@ -1,0 +1,121 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "photoos"
+version = "0.2.0"
+description = "PhotoOS - 个人摄影管理系统 (Photo Library Foundation, Phase 1)"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+
+# 版本已按本机实测锁定的实际安装版本钉死（见 PHASE1_TECH_PLAN.md §2 / §11.5）。
+# 全部为 cp312 win_amd64 预编译 wheel，无需编译器。
+dependencies = [
+    "fastapi==0.143.0",
+    "uvicorn[standard]==0.54.0",
+    "pydantic==2.14.0",
+    "pydantic-settings==2.15.0",
+    "python-multipart==0.0.32",
+    "Pillow==12.3.0",
+    "pillow-heif==1.8.0",
+    "rawpy==0.27.1",
+    "numpy==2.5.4",
+    "ExifRead==3.5.1",
+    "blake3==1.0.11",
+]
+
+[project.optional-dependencies]
+# 视频缩略图/时长：需要随包的 ffmpeg。不装 = 视频只索引元数据（界面不报错）。
+video = [
+    "imageio-ffmpeg==0.6.0",
+]
+dev = [
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
+    "httpx==0.28.1",
+]
+
+# ★ 「一键装齐 AI 能力」：**本机实测跑着的那一组**，CPU 就能跑。
+#
+#   * `onnxruntime`（CPU 版）—— CLIP 的图像/文字向量、Scene 划分；
+#   * `opencv-python-headless` —— 人脸检测与特征（YuNet + SFace）。用 headless：
+#     这条链路只需要算法，不需要 GUI；
+#   * `torch` + `sentence-transformers` —— EmbeddingGemma 的中文文字查询。
+#     PyPI 上的 Windows 轮子是 CPU 版（本机另有一份 cu130 的，属个人环境）。
+#
+# 不装这个 extra 也能跑：浏览、精选、主题、人物（读已算好的数据）、打包全都可用，
+# 只是不能新建向量/检测人脸。**模型权重不在包里**，用 `photoos ai fetch-model` 下载
+# （CLIP 335 MB（只下视觉塔）+ 人脸 37 MB + EG2 1455 MB，见 安装说明.md）。
+# 2026-10-18 实测通过的一组（中文语义搜索端到端）：
+#   * sentence-transformers 6.1.0 **强制** transformers 5.x（4.x 会缺 sentence_transformers.base）
+#   * 缺 torchvision 时模型加载直接报 EmbeddingGemma2VideoProcessor requires Torchvision
+#   * 装了 torch 仍需 fastapi/pydantic 等运行时依赖，否则 `python -m photoos` 起不来
+ai-cpu = [
+    "onnxruntime==1.31.0",
+    "opencv-python-headless==5.0.0",
+    "torch==2.14.1",
+    "torchvision==0.29.1",
+    "sentence-transformers==6.1.0",
+    "transformers>=5.0,<6.0",
+]
+
+# 有 NVIDIA 显卡时用这一组替换上面的 onnxruntime（CLIP 快若干倍）。
+# **版本组合是本机实测唯一可用的那一组**，理由见 PHASE2_RESEARCH.md §2.3 与
+# PHASE2_TECH_PLAN.md §3.2：
+#   * onnxruntime-gpu 必须 1.25.1（**CUDA 12 构建**）。1.27+ 要 CUDA 13，
+#     而 PyPI 上 CUDA 13 的 Windows 轮子只有 cuDNN 有 —— cublas/cufft/curand/
+#     nvrtc/runtime/nvjitlink **全部没有 win_amd64**，装出来跑不了。
+#   * nvidia-cudnn-cu12 必须 9.10.2.21。9.27.0.42 实测在第一次 Conv 就
+#     `CUDNN_STATUS_SUBLIBRARY_LOADING_FAILED`，且 onnxruntime 会**静默降级到 CPU**。
+#   * 代码里必须显式调 `ort.preload_dlls()`（ORT ≥1.21 在 Windows 不再自动加载
+#     nvidia-* 站点包里的 DLL）—— 漏了同样静默降级。
+ai-gpu = [
+    "onnxruntime-gpu==1.25.1",
+    "nvidia-cublas-cu12==12.9.2.10",
+    "nvidia-cudnn-cu12==9.10.2.21",
+    "nvidia-cuda-runtime-cu12==12.9.79",
+    "nvidia-cuda-nvrtc-cu12==12.9.86",
+    "nvidia-cufft-cu12==11.4.1.4",
+    "nvidia-curand-cu12==10.3.10.19",
+    "nvidia-nvjitlink-cu12==12.9.86",
+]
+
+[project.scripts]
+photoos = "photoos.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "backend" }
+
+[tool.setuptools.packages.find]
+where = ["backend"]
+
+[tool.setuptools.package-data]
+# ⚠️ 前端资源必须**逐类列出**：`web/*` 只匹配 web 目录**下一层**的文件，
+# 于是 `web/js/*.js`、`web/css/*.css`、`web/fonts/*` 全都不会进包 ——
+# 装到别人机器上打开就是一张白页（而作者这里是可编辑安装，读的是源码树，
+# 所以这个缺陷**在本机永远看不见**）。实测：修之前 wheel 里只有 index.html。
+photoos = [
+    "db/migrations/*.sql",
+    "web/*.html",
+    "web/js/*.js",
+    "web/css/*.css",
+    "web/fonts/*",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["backend"]
+markers = [
+    "breakpoint: PRD §9.1 断点测试（需要真实照片库，默认不快跑）",
+    "slow: 耗时测试",
+]
+addopts = "-q"
+filterwarnings = [
+    # pydantic-settings 在"未配置 JsonConfigSettingsSource"时会提示 json_file_encoding 未生效。
+    # 本项目是按需动态挂载该来源的（见 Settings.settings_customise_sources），该提示属噪音。
+    "ignore:Config key `json_file_encoding` is set:UserWarning",
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated:UserWarning",
+]

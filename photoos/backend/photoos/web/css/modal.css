@@ -1,0 +1,334 @@
+/* ============================================================================
+ * PhotoOS · 中央弹窗（原片查看器）
+ *
+ * ## 为什么不是侧边抽屉
+ *
+ * 侧边抽屉只有 560px 宽，看照片时要歪着头、还要先判断"右边那块是不是我要的"。
+ * 看照片这件事本身需要一个**大**的容器：弹窗占满视口、图片居中、
+ * 元数据在右侧一栏。照片库、找照片、人物三处点"看原片"都落到这里。
+ *
+ * ## 为什么里面没有"下载原片"
+ *
+ * 这个应用跑在用户自己的机器上，原片就在同一个硬盘上。把它重新流一遍再落到
+ * "下载"目录纯属浪费。所以这里给的是**路径**：完整相对路径 + 绝对路径，
+ * 一个「复制路径」、一个「在资源管理器里显示」（服务端 `explorer /select`）。
+ * 真要在浏览器里看图，还有「用浏览器打开原图」——那是**看**，不是**搬**。
+ *
+ * ## 布局三坑（与 phase2.css 同源，这里再踩一次会更贵）
+ *
+ * `position: fixed` 的容器若没有自己的滚动容器，内容高了就会被裁掉；
+ * 两栏用 grid，图片那栏必须 `min-height: 0` 才能让内部 `overflow` 生效。
+ * ========================================================================== */
+
+.asset-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 60;                 /* 高于抽屉（30）与 toast（40） */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+/* ⚠️ 作者样式里的 `display:flex` 会压过 UA 的 `[hidden]{display:none}` ——
+   少了这一条，空弹窗会一直盖在页面上，所有点击都被它吃掉。 */
+.asset-modal[hidden] {
+  display: none;
+}
+
+.asset-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(3, 7, 18, 0.72);
+  backdrop-filter: blur(2px);
+}
+
+.asset-modal-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(1180px, 96vw);
+  height: min(860px, 92vh);
+  min-height: 0;
+  background: var(--ink-panel);
+  border: 1px solid var(--ink-line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--sh-lg);
+  overflow: hidden;
+}
+
+.asset-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding: 10px var(--sp-5);
+  border-bottom: 1px solid var(--ink-divider);
+  background: var(--ink-panel-2);
+  flex: 0 0 auto;
+}
+
+.asset-modal-title {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--ink-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.asset-modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.asset-modal-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+/* 左：图。`background` 用近黑，缩略图/预览都是暗调照片时边界更清楚 */
+.asset-modal-stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  padding: var(--sp-5);
+  background: var(--ink-stage);
+  overflow: auto;
+}
+
+.asset-modal-stage img,
+.asset-modal-stage video {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: var(--r-sm, 4px);
+  display: block;
+}
+
+.asset-modal-stage img.is-preview-fallback {
+  cursor: zoom-in;
+}
+
+/* 右：元数据 + 原片在哪 */
+.asset-modal-side {
+  min-height: 0;
+  overflow: auto;
+  padding: 14px 16px 18px;
+  border-left: 1px solid var(--ink-divider);
+  background: var(--ink-panel);
+}
+
+.asset-modal-side h3 {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: none;
+  color: var(--ink-text-3);
+  margin: 14px 0 6px;
+}
+
+.asset-modal-side h3:first-child {
+  margin-top: 0;
+}
+
+/* ------------------------------------------------------------------ 标签行
+ *
+ * 一张照片上已有的判断与归类（精选状态 / 内容命中 / 人物），合成**一行**。
+ *
+ * ⚠️ 常态是**空**的：实测 94% 的照片没有任何已归属人物、内容命中也不是每张都有，
+ * 所以整块多数时候不出现 —— 这是"不臃肿"的关键（见 app.js 的 tagsHtml）。
+ *
+ * 交互统一为两个：**点标签 = 按它筛**；**× = 解除/否决**。没有第三个动作，
+ * 所以不需要额外的编辑面板。 */
+.asset-tags {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 10px;
+  margin-bottom: 14px;
+  border: 1px solid var(--ink-divider);
+  border-radius: var(--r-md);
+  background: var(--ink-panel-2);
+}
+.asset-tags-label {
+  flex: 0 0 auto;
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.06em;
+  color: var(--ink-text-3);
+  padding-top: 3px;
+}
+.asset-tags-list { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+/* 空标签行：保留占位但压到最淡 —— 它存在的理由是**防止标签异步到达时把
+   下面的内容推下去**（见 app.js 的说明），不是为了好看。 */
+.asset-tags.is-empty { padding: 7px 10px; background: none; border-style: dashed; }
+.asset-tags.is-empty .asset-tags-label { padding-top: 0; }
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 220px;
+  border: 1px solid var(--ink-line);
+  border-radius: var(--r-pill);
+  background: var(--ink-panel);
+  font-size: var(--fs-xs);
+  color: var(--ink-text-2);
+}
+.tag-note { padding-right: 8px; color: var(--ink-text-3); font-size: var(--fs-2xs); }
+
+.tag-open {
+  padding: 2px 9px;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  appearance: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tag-open:hover { color: var(--royal-200); }
+.tag-open:focus-visible { outline: none; box-shadow: var(--focus-tight); border-radius: var(--r-pill); }
+
+.tag-x {
+  flex: 0 0 auto;
+  width: 17px; height: 17px;
+  margin-right: 3px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  border-radius: 50%;
+  color: var(--ink-text-3);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  appearance: none;
+}
+.tag-x:hover { color: var(--ink-text); background: var(--wine-a32); }
+.tag-x:focus-visible { outline: none; box-shadow: var(--focus-tight); }
+
+/* 内容命中是**模型给的**，不是人标的 —— 所以它用皇家蓝（"机器在做的事"），
+   不用金色。金色只留给"你认可的"精选状态，两者不能混（视觉纪律）。 */
+.tag-content { border-color: var(--royal-300); }
+.tag-content .tag-open { color: var(--royal-200); }
+
+/* 主题标签：**你在哪些主题里放了它**。
+   金色 —— 主题是用户自己建的（"你的选择"），与"模型给的"内容命中（皇家蓝）
+   和"别人标的"人物区分开。 */
+.tag-collection { border-color: var(--gold-a40); }
+.tag-collection .tag-open { color: var(--gold-400); }
+
+/* 精选状态下拉：这是**唯一的真标签来源**，用金色描边凸显。 */
+.tag-selection { border-color: var(--gold-a45); padding-left: 5px; }
+.tag-selection select {
+  min-height: 24px;
+  padding: 0 6px;
+  border: none;
+  background: none;
+  color: var(--gold-400);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  appearance: none;
+}
+.tag-selection select:focus-visible { outline: none; box-shadow: var(--focus-tight); }
+.tag-selection select option { background: var(--ink-panel); color: var(--ink-text); }
+
+/* 原片位置：这一块是弹窗存在的理由之一，给它一个明显的底。
+ * 金色用**描边 + 同色系淡底**，不用左侧 3px 竖条（AI 生成痕迹）。 */
+.asset-path {
+  border: 1px solid var(--gold-a45);
+  border-radius: var(--r-sm);
+  background: var(--gold-a05);
+  padding: 10px 12px;
+}
+
+.asset-path-line {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+  color: var(--ink-text);
+  word-break: break-all;
+  user-select: text;          /* 让用户能直接拖选复制 */
+}
+
+.asset-path-line.is-dim {
+  color: var(--ink-text-3);
+}
+
+.asset-path-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.asset-path-state {
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  margin-top: 8px;
+}
+
+.asset-path-state.is-ok { color: var(--ink-text-2); }
+.asset-path-state.is-bad { color: var(--wine-400); }
+
+/* 打包完成的结果框：比原片弹窗小得多，只有一个"路径 + 两个动作" */
+.pack-result {
+  position: relative;
+  z-index: 1;
+  width: min(680px, 92vw);
+  padding: 18px var(--sp-6) var(--sp-6);
+  background: var(--ink-panel);
+  border: 1px solid var(--gold-a45);
+  border-radius: var(--r-lg);
+  box-shadow: var(--sh-lg);
+}
+
+.pack-result h3 {
+  margin: 0 0 6px;
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--ink-text);
+}
+
+.pack-result .asset-path-line {
+  display: block;
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  background: var(--ink-panel-2);
+  border: 1px solid var(--ink-divider);
+  border-radius: var(--r-sm, 4px);
+}
+
+/* 「主题」一块：一行里放下拉框与两个按钮 */
+.asset-collect {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.asset-collect select {
+  flex: 1 1 150px;
+  min-width: 120px;
+}
+
+/* 窄屏（< 900px）：元数据落到图片下面，弹窗改成整屏滚动 */
+@media (max-width: 900px) {
+  .asset-modal { padding: 10px; }
+  .asset-modal-panel { height: min(920px, 96vh); }
+  .asset-modal-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+  .asset-modal-side { border-left: none; border-top: 1px solid var(--ink-divider); max-height: 46vh; }
+}

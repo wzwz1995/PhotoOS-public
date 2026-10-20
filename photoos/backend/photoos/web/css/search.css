@@ -1,0 +1,578 @@
+/* ============================================================================
+ * PhotoOS · 文字搜索样式（Phase 3）
+ *
+ * 设计系统与 Phase 2 同一套（Feihong Design System v8.0 · 场景 06 Console）。
+ * 令牌定义在 `css/tokens.css`（**第一个加载，且是全应用唯一定义处**；
+ * 本文件只消费，不定义）。见 tokens.css 顶部关于"为什么只有一处"的说明。
+ *
+ * ## 两条视觉纪律（都有实测依据）
+ *
+ * 1. **不做"评分/推荐"的视觉语言**（PRD §9.2 LOCKED）：没有星级、没有进度条、
+ *    没有"匹配度 87%"的大字。相似度**刻意做得极小且灰**（`--ink-text-3`），
+ *    它的作用只是"为什么它在前面"的可核对性，不是给人比较优劣的。
+ *
+ * 2. **拍摄时刻是主角**：用等宽字体（JetBrains Mono）与较大的字号突出，
+ *    因为实测模型分不清日出与日落（两者 top-100 重合 65%），
+ *    `07:39` 与 `17:44` 才是用户真正的判断依据。
+ *
+ * ## 本文件为什么要复述"布局三坑"
+ *
+ * `app.css` 的 `.view.is-active` 是**横向 flex**，往 `<section>` 里直接塞块会被摊成窄柱；
+ * 纵向 flex 的子项默认 `flex-shrink: 1`，容器有固定高度时会被压扁。
+ * Phase 2 已经踩过这两个坑（PHASE2_TECH_PLAN §13.58），新视图必须自己设。
+ * ========================================================================== */
+
+/* 布局修正在 phase2.css 的 `#view-*.view` 规则里统一处理（五个懒加载视图共用一份），
+   这里不再重复定义 —— 两处各写一份迟早会漂移。 */
+
+/* ------------------------------------------------------------------ 搜索栏 */
+.search-bar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin: 14px 0 6px;
+  flex-wrap: wrap;
+}
+
+.search-pick {
+  flex: 1 1 320px;
+  min-width: 240px;
+  padding: 0 var(--sp-4);
+  min-height: 42px;
+  background: var(--ink-panel-2);
+  color: var(--ink-text);
+  border: 1px solid var(--ink-line);
+  border-radius: var(--r-md);
+  font-family: var(--font-ui);
+  font-size: var(--fs-md);
+  /* 原生控件必须重置，否则各浏览器长相不一（Phase 2 有专门断言守这条） */
+  appearance: none;
+}
+
+.search-input {
+  flex: 1 1 260px;
+  min-width: 200px;
+  padding: 0 var(--sp-4);
+  min-height: 42px;
+  background: var(--ink-panel-2);
+  color: var(--ink-text);
+  border: 1px solid var(--ink-line);
+  border-radius: var(--r-md);
+  font-family: var(--font-ui);
+  font-size: var(--fs-md);
+}
+
+.search-input::placeholder {
+  color: var(--ink-text-3);
+}
+
+.search-pick:focus-visible,
+.search-input:focus-visible,
+#search-go:focus-visible {
+  outline: none;
+  border-color: var(--royal-400);
+  box-shadow: var(--focus);
+}
+
+/* ------------------------------------------------------------------ 结果头 */
+.search-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  padding: 12px 0 6px;
+  border-bottom: 1px solid var(--ink-divider);
+  flex-wrap: wrap;
+}
+
+.search-word {
+  font-family: var(--font-display);
+  font-size: 22px;
+  color: var(--gold-500);       /* 金 = 高亮（不是"更好"） */
+  margin-right: 8px;
+}
+
+/* ------------------------------------------------------------------ 结果网格 */
+.search-results {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 14px;
+  padding: 14px 0 24px;
+}
+
+.search-card {
+  margin: 0;
+  background: var(--ink-panel);
+  border: 1px solid var(--ink-divider);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: border-color var(--dur-fast) var(--ease);
+}
+/* 卡片整体可点（图片区铺了一个真 <button>），hover 时给个统一反馈 */
+.search-card:hover { border-color: var(--ink-line); }
+
+.search-card img {
+  width: 100%;
+  height: 150px;
+  object-fit: cover;
+  display: block;
+  background: var(--ink-base);
+}
+
+.search-card figcaption {
+  padding: 8px 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* 拍摄时刻：**本页最重要的信息**，用等宽字体 + 较大字号 */
+.search-when {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--ink-text);
+  letter-spacing: 0.02em;
+}
+
+.search-hour {
+  color: var(--gold-500);
+  font-weight: 700;
+}
+
+.search-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* 相似度刻意极小且灰：它用于核对"为什么在前面"，**不是给人比优劣的** */
+.search-rank {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-text-3);
+}
+
+/* ------------------------------------------------------- 原片入口（卡片底部）
+ *
+ * 已**提升为全应用公共件**：样式在 `app.css` 的 `.card-file / .card-dir /
+ * .card-open / .card-name / .card-cue`，标记由 `js/cards.js` 的 `fileBlock()` 产出。
+ *
+ * 挪走的原因：这一段原先只写在 `search.css` 里，而这张表**只有找照片页加载**——
+ * 别的页面（主题、加入主题弹窗）就算产出同样的标记也拿不到样式，
+ * 于是各自又抄了一遍、且都漏掉了"文件名可点 = 看原片"。
+ * 留这段说明是为了让后来者知道 `.sc-file` 这一族**去哪了**，别在这里重新定义。 */
+
+/* ------------------------------------------------------------------ 你的修改（学习栏） */
+
+/* 这一栏的措辞纪律：显示的是**用户自己的表态统计**，不是模型给照片打的分。
+   所以这里没有百分比、没有进度条、没有"准确率"。 */
+.learn-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--sp-5);
+  flex-wrap: wrap;
+  margin: 10px 0 2px;
+  padding: 10px var(--sp-5);
+  background: var(--ink-panel-2);
+  border: 1px solid var(--ink-divider);
+  border-radius: var(--r-md);
+}
+
+.learn-info {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.learn-title {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  color: var(--ink-text-3);
+  letter-spacing: 0.08em;
+}
+
+.learn-count {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--ink-text-2);
+}
+
+.learn-count b {
+  color: var(--gold-500);        /* 金 = 你的选择（不是"更好"） */
+  font-weight: 700;
+}
+
+/* 「已按你的修改重排」= 状态，不是评价；所以用皇家蓝而不是金色 */
+.learn-badge {
+  font-family: var(--font-ui);
+  font-size: var(--fs-xs);
+  color: var(--royal-200);
+  background: var(--royal-a16);
+  border: 1px solid rgba(123, 157, 219, 0.4);
+  border-radius: var(--r-pill);
+  padding: 2px 10px;
+}
+
+.learn-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.check.inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  color: var(--ink-text-2);
+  cursor: pointer;
+}
+
+/* ------------------------------------------------------------------ 结果卡片上的表态 */
+
+.search-card .sc-img {
+  position: relative;
+  line-height: 0;
+}
+
+.sc-mark {
+  position: absolute;
+  top: var(--sp-3);
+  left: var(--sp-3);
+  font-family: var(--font-ui);
+  font-size: var(--fs-xs);
+  padding: 2px var(--sp-3);
+  border-radius: var(--r-pill);
+  background: rgba(4, 15, 42, 0.85);
+  border: 1px solid var(--ink-line);
+  color: var(--ink-text-2);
+  /* 它在"点图即选"的按钮之上，别把点击吃掉 */
+  pointer-events: none;
+}
+
+/* 已选入 = 金框；已删掉 = 酒红框并压暗。两者都只是"你把这张放哪儿"，
+   不表达好坏 —— 这是本项目的硬纪律。 */
+.search-card.is-keep {
+  border-color: var(--gold-a55);
+}
+
+.search-card.is-keep .sc-mark {
+  color: var(--gold-500);
+  border-color: var(--gold-a40);
+}
+
+.search-card.is-drop {
+  border-color: var(--wine-a40);
+}
+
+.search-card.is-drop .sc-mark {
+  color: var(--wine-400);
+  border-color: var(--wine-a40);
+}
+
+.search-card.is-drop img {
+  opacity: 0.5;
+}
+
+.sc-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.sc-actions .btn {
+  flex: 1 1 0;
+}
+
+/* ------------------------------------------------------------------ 多选
+ *
+ * 选择态用**皇家蓝环**，不用金色：金色在本项目里一律表示"你的判断"（已选入），
+ * 而"这几张我正挑着"是一个**进行中**的状态，不是判断结果。
+ * 两者混用会让"我选中了"和"我已经把这张留下了"看起来一样 —— 那是会出错的。
+ */
+.search-card.is-picked {
+  border-color: var(--royal-400);
+  box-shadow: var(--focus-tight);
+}
+
+/* 点图即选。用真 `<button>` 铺满图片区：键盘 Tab 能到、回车能按，不是只有鼠标能用。 */
+.sc-pick {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  appearance: none;
+}
+
+.sc-pick:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 3px var(--royal-400);
+}
+
+.sc-tick {
+  position: absolute;
+  top: var(--sp-3);
+  right: var(--sp-3);
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  line-height: 1;
+  color: transparent;
+  background: rgba(4, 15, 42, 0.6);
+  border: 1px solid rgba(233, 238, 250, 0.55);
+  border-radius: 50%;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+
+.sc-pick:hover .sc-tick {
+  border-color: var(--royal-300);
+}
+
+.search-card.is-picked .sc-tick {
+  color: var(--royal-900);
+  background: var(--royal-300);
+  border-color: var(--royal-200);
+}
+
+.search-card.is-picked .sc-tick::before {
+  content: '✓';
+}
+
+/* 重排进行中：只压暗，**不重建**（清空容器会把滚动位置弹回页首） */
+.search-results.is-busy {
+  opacity: 0.5;
+  transition: opacity 0.12s;
+}
+
+/* ------------------------------------------------------------------ 多选操作条
+
+   吸在视图底部：挑照片时要一路往下滚，按钮必须一直够得着。
+   `position: sticky` 的元素仍然占着文档流里的位置，所以列表末尾那一行不会被压住。 */
+.pick-bar {
+  position: sticky;
+  bottom: 10px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+  margin: 0 0 var(--sp-6);
+  padding: 10px var(--sp-5);
+  background: var(--ink-panel-2);
+  border: 1px solid rgba(123, 157, 219, 0.45);
+  border-radius: var(--r-md);
+  box-shadow: var(--sh-lg);
+}
+
+/* ⚠️ 少了这一条，`hidden` 会失效：本文件的 `display:flex` 属于作者样式，
+   它压过浏览器默认的 `[hidden]{display:none}`，空条子就永远挂在页面上了。 */
+.pick-bar[hidden] {
+  display: none;
+}
+
+.pick-count {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: var(--ink-text-2);
+}
+
+.pick-count b {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  color: var(--gold-500);      /* 金 = 你选中了（不是"更好"） */
+}
+
+.pick-tip {
+  margin: 0;
+}
+
+.pick-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+/* 已删除：`.search-empty`（2026-10-14）—— 空态统一走 `.wb-empty`（phase2.css）。 */
+
+/* 「在命令行跑一次」的代码块。
+ *
+ * ⚠️ 样式**已移到 phase2.css 的 `.cmd-block`**（那里有完整说明：为什么必须
+ * `white-space: pre` + 横向滚动，以及"窄屏上命令被硬切成几段"那个实测缺陷）。
+ * 这里不再重复声明 —— 同一个组件两份声明正是那处缺陷的成因。 */
+
+/* 精选状态徽标沿用 Phase 2 的样式（.sel-badge / .sel-final 等已在 phase2.css 定义） */
+
+/* ------------------------------------------------------------------ 两种模式切换
+ *
+ * 这是**页内的视图切换**，与顶栏切页（`.tab`）是同一件事的两个尺度。
+ * 两者共用同一条品牌语义：**当前项 = 金色下边框 + 金字**（Console 的激活语义）。
+ * 改前 `.tab` 是灰底描边、这里却是金色下边框 —— 同一件事两种长相。 */
+.find-modes {
+  display: flex;
+  gap: 0;
+  margin: var(--sp-5) 0 var(--sp-1);
+  border-bottom: 1px solid var(--ink-divider);
+}
+
+.find-mode {
+  min-height: 40px;
+  padding: 0 18px;
+  background: transparent;
+  color: var(--ink-text-2);
+  border: none;
+  border-bottom: 2px solid transparent;
+  font-family: var(--font-ui);
+  font-size: var(--fs-md);
+  font-weight: 500;
+  cursor: pointer;
+  appearance: none;
+  transition: color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+
+.find-mode:hover {
+  color: var(--ink-text);
+}
+
+.find-mode:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-tight);
+}
+
+/* 金 = 高亮当前项（不是"更好"） */
+.find-mode.is-active {
+  color: var(--gold-500);
+  border-bottom-color: var(--gold-500);
+}
+
+/* ------------------------------------------------------------------ 结构化筛选 */
+.find-form {
+  display: flex;
+  gap: var(--sp-4);
+  align-items: flex-end;
+  flex-wrap: wrap;
+  margin: var(--sp-5) 0 var(--sp-3);
+}
+
+.find-form label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  font-family: var(--font-ui);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--ink-text-2);
+}
+
+.find-form input,
+.find-form select {
+  padding: 0 var(--sp-3);
+  min-height: 42px;
+  min-width: 150px;
+  background: var(--ink-panel-2);
+  color: var(--ink-text);
+  border: 1px solid var(--ink-line);
+  border-radius: var(--r-md);
+  font-family: var(--font-ui);
+  font-size: var(--fs-md);
+  appearance: none;
+}
+
+.find-form input:focus-visible,
+.find-form select:focus-visible {
+  outline: none;
+  border-color: var(--royal-400);
+  box-shadow: var(--focus);
+}
+
+.find-results {
+  padding: 6px 0 24px;
+  overflow-x: auto;
+}
+
+.find-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.find-table th {
+  text-align: left;
+  padding: 8px 10px;
+  color: var(--ink-text-3);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 500;
+  border-bottom: 1px solid var(--ink-divider);
+  white-space: nowrap;
+}
+
+.find-table td {
+  padding: 8px 10px;
+  color: var(--ink-text-2);
+  border-bottom: 1px solid var(--ink-divider);
+  vertical-align: middle;
+}
+
+.find-table tr:hover td {
+  background: var(--ink-panel-2);
+}
+
+.find-table .mono {
+  font-family: var(--font-mono);
+  color: var(--ink-text);
+  white-space: nowrap;
+}
+
+/* 表格里的按钮不要换行 —— 但**尺寸仍然用全局的 `.btn.small`**（34px / 13px）。
+ *
+ * ⚠️ 这里原来把 `.btn.small` 改成 `padding: 5px 12px; font-size: 12px`，
+ * 而 search.css 在 phase2.css **之后**加载：那一条不只作用于本页，
+ * 它把**全应用**的小按钮都改小了一号（找照片、人物、主题一起变），
+ * 于是"同一个 `.btn.small`"在不同页面高度不同。少写一行就少一处口径。 */
+.find-table .btn.small,
+#mode-when .btn.small {
+  white-space: nowrap;
+}
+
+#mode-when[hidden] {
+  display: none;
+}
+
+
+/* 空状态卡片要**跨满整行**。
+ * `.search-results` 是 210px 的卡片网格，空状态直接塞进去只占一格 ——
+ * 于是"还没有可以搜的词"被挤成 200px、文字每行断一次（截图反馈）。
+ */
+.search-results > .wb-empty {
+  grid-column: 1 / -1;
+  align-items: flex-start;
+  text-align: left;
+  padding: 28px 32px;
+}
+.search-results > .wb-empty > * { max-width: 620px; }
+.search-results > .wb-empty p { margin: 0; line-height: 1.75; }
+.search-results > .wb-empty .search-prepare-row { margin: 16px 0 4px; }
+
+/* 自定义常用词输入框：和按钮同高，允许多个词 */
+.prepare-words-input {
+  min-width: 260px; max-width: 420px; padding: 6px 10px;
+  border: 1px solid var(--ink-line); border-radius: var(--r-sm);
+  background: var(--ink-panel-2); color: var(--ink-text); font-size: 13px;
+}
+.prepare-words-input:focus { outline: none; border-color: var(--gold-500); }

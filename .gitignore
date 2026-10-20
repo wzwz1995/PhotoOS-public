@@ -1,0 +1,88 @@
+# ============================================================================
+#  PhotoOS · 什么进仓库、什么永远不进
+#
+#  这个目录（C:\PhotoOS）同时是**数据根**和**代码仓库的父目录**，
+#  所以这里的忽略规则不是"清理一下"，而是**安全边界**：
+#
+#    * data\          索引库 / 缩略图 / 预览 / 导出 / 日志 / AI 模型缓存
+#    * _samples\      实测用的**真实 RAW 原片**
+#    * venv\models  AI 模型权重（2.1 GB）
+#    * 各种 .db       库里有人物、人脸向量、照片路径 —— 属于隐私数据
+#
+#  铁律：**照片原文件与索引数据永不进仓库**（原片在这里只是只读索引，
+#  仓库更不该有它们的副本）。
+# ============================================================================
+
+# ---------------------------------------------------------------- 环境 / 依赖
+.venv/
+venv/venv/
+venv/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+.eggs/
+
+# ---------------------------------------------------------------- 构建产物
+photoos/build/
+photoos/dist/
+_dist_package/
+_dist_package.zip
+*.whl
+
+# ---------------------------------------------------------------- AI 模型权重
+# 2.1 GB（CLIP 581 MB + EmbeddingGemma 1455 MB + 人脸 37 MB）。
+# 收件人自己下：`python -m photoos ai fetch-model --engine all`
+venv/models/
+data/ai_cache/
+*.onnx
+*.safetensors
+
+# ---------------------------------------------------------------- 数据与用户内容
+data/
+venv/_p4/
+venv/_eg2test/
+venv/_dist/
+venv/_shots/
+venv/_shots_copy/
+venv/_faces/
+_probe/shots/
+_samples/
+exports/
+logs/
+
+# ---------------------------------------------------------------- 隐私 / 大文件
+# .db：人物、人脸向量、照片绝对路径；.npz：人脸/嵌入缓存
+*.db
+*.db-wal
+*.db-shm
+*.npz
+*_originals_fingerprint.json
+
+# ---------------------------------------------------------------- 界面快照与临时文件
+# 探针截图（几十 MB，随时可再生：python _probe\ui_regress.py）
+_probe/shots/
+venv/*.png
+*.log
+# pytest 的 junit 产物（每次跑都重新生成）
+_junit*.xml
+# 测试证据（日志/截图/JUnit/报告；默认不进仓库，发版记录另存）
+_test-runs/
+
+# ---------------------------------------------------------------- 编辑器 / 系统
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+
+# 构建产物与本地工具链（不进版本库）
+desktop/runtime/
+desktop/.tools/
+desktop/_dist/
+desktop/node_modules/
+
+# 用户自己的笔记/编辑器目录
+photoos/docs/.obsidian/
+
+# 本机临时脚本/笔记（清库脚本、一次性调试），不进仓库、不进包、不同步公开分支
+_local/
