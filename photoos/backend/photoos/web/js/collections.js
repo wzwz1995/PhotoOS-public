@@ -100,7 +100,7 @@ function renderDetail() {
     <p class="hint">
       ${escapeHtml(detail.description || '（无描述）')}
       · 共 <strong>${detail.count}</strong> 张
-      · 覆盖 <strong>${detail.scenes}</strong> 个 Scene（跨 Scene / 跨时段都正常）
+      · 覆盖 <strong>${detail.scenes}</strong> 个场景（跨场景 / 跨时段都正常）
     </p>
     <p class="hint tiny">
       主题与物理目录<strong>完全无关</strong>：加入或移出只改数据库关系，
@@ -274,7 +274,7 @@ async function addShotsToCollection(collectionId, shotIds) {
     // ⚠️ 这句话原来写的是「先选中一些作品（在「精选」视图里勾选）」——
     // 但精选视图里**从来没有勾选框**，而且整个应用里没有任何地方调用这个函数。
     // 现在真正的入口是工作台里的「加入主题…」（`review.js`），所以提示照实说。
-    toast('没有可加入的照片：先在工作台里选一个 Shot（或先标出最终精选）', true);
+    toast('没有可加入的照片：先在精选里选一个拍摄组（或先标出最终精选）', true);
     return 0;
   }
   const added = await API.post(`/api/collections/${collectionId}/items`, { shot_ids: shotIds });

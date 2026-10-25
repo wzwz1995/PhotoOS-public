@@ -282,6 +282,120 @@ def test_inbox_import_copies_but_never_touches_the_source(client: TestClient) ->
     assert again.json()["message"]
 
 
+def test_inbox_import_can_clean_sources_after_success(client: TestClient) -> None:
+    """显式勾选清理后：只删已入库的收件箱副本，目标文件仍在库里。"""
+    settings: Settings = client.settings  # type: ignore[attr-defined]
+    source = _photo(settings.effective_inbox_path / "cleanup.JPG", 18)
+    _force_stable(settings)
+
+    job = client.post(
+        "/api/inbox/import",
+        json={"confirmed": True, "cleanup_after_import": True},
+    ).json()["job"]
+    queue = JobQueue(client.db)  # type: ignore[attr-defined]
+    record = queue.claim_next()
+    assert record is not None and record.id == job["id"]
+    report = JobRunner(client.db, settings).run(record)  # type: ignore[attr-defined]
+    assert report.status == "COMPLETED", report.error
+
+    assert not source.exists(), "勾选清理后，已成功入库的收件箱副本应当删除"
+    copied = list(client.library_root.rglob("*.JPG"))  # type: ignore[attr-defined]
+    assert len(copied) == 1
+    assert "收件箱清理" in report.stages
+    assert "已清理 1 个" in report.stages["收件箱清理"]
+
+    status = client.get("/api/inbox").json()
+    assert status["total"] == 0
+
+
+def test_inbox_cleanup_endpoint_requires_confirmation_and_removes(client: TestClient) -> None:
+    """手动清理入口：未确认拒绝；确认后只删已入库副本，目标仍在。"""
+    settings: Settings = client.settings  # type: ignore[attr-defined]
+    source = _photo(settings.effective_inbox_path / "manual.JPG", 21)
+    _force_stable(settings)
+    job = client.post("/api/inbox/import", json={"confirmed": True}).json()["job"]
+    queue = JobQueue(client.db)  # type: ignore[attr-defined]
+    record = queue.claim_next()
+    assert record is not None and record.id == job["id"]
+    report = JobRunner(client.db, settings).run(record)  # type: ignore[attr-defined]
+    assert report.status == "COMPLETED", report.error
+    assert source.is_file()
+
+    denied = client.post("/api/inbox/cleanup", json={})
+    assert denied.status_code == 428
+    result = client.post("/api/inbox/cleanup", json={"confirmed": True}).json()
+    assert result["deleted"] == 1
+    assert result["errors"] == []
+    assert not source.exists()
+    assert len(list(client.library_root.rglob("*.JPG"))) == 1  # type: ignore[attr-defined]
+
+
+def test_duplicate_source_is_recorded_and_cleaned(client: TestClient) -> None:
+    """同内容换名字再导入：也要记进台账，否则永远显示"可导入"。"""
+    settings: Settings = client.settings  # type: ignore[attr-defined]
+    first = _photo(settings.effective_inbox_path / "first.JPG", 22)
+    _force_stable(settings)
+    job = client.post("/api/inbox/import", json={"confirmed": True}).json()["job"]
+    queue = JobQueue(client.db)  # type: ignore[attr-defined]
+    record = queue.claim_next()
+    assert record is not None and record.id == job["id"]
+    report = JobRunner(client.db, settings).run(record)  # type: ignore[attr-defined]
+    assert report.status == "COMPLETED", report.error
+
+    duplicate = settings.effective_inbox_path / "copy-of-first.JPG"
+    shutil.copyfile(first, duplicate)
+    _force_stable(settings)
+    job = client.post(
+        "/api/inbox/import",
+        json={"confirmed": True, "cleanup_after_import": True},
+    ).json()["job"]
+    record = queue.claim_next()
+    assert record is not None and record.id == job["id"]
+    report = JobRunner(client.db, settings).run(record)  # type: ignore[attr-defined]
+    assert report.status == "COMPLETED", report.error
+    assert "收件箱台账" in report.stages, report.stages
+    assert "已登记 1 个文件" in report.stages["收件箱台账"]
+    assert not first.exists() and not duplicate.exists()
+    assert len(list(client.library_root.rglob("*.JPG"))) == 1  # type: ignore[attr-defined]
+    assert client.get("/api/inbox").json()["total"] == 0
+
+
+def test_inbox_cleanup_keeps_file_when_target_is_missing(client: TestClient) -> None:
+    """目标文件不在了就绝不删收件箱副本 —— 清理不能变成丢照片。"""
+    settings: Settings = client.settings  # type: ignore[attr-defined]
+    source = _photo(settings.effective_inbox_path / "keep.JPG", 19)
+    _force_stable(settings)
+
+    job = client.post("/api/inbox/import", json={"confirmed": True}).json()["job"]
+    queue = JobQueue(client.db)  # type: ignore[attr-defined]
+    record = queue.claim_next()
+    assert record is not None and record.id == job["id"]
+    report = JobRunner(client.db, settings).run(record)  # type: ignore[attr-defined]
+    assert report.status == "COMPLETED", report.error
+    copied = list(client.library_root.rglob("*.JPG"))  # type: ignore[attr-defined]
+    assert len(copied) == 1
+    copied[0].unlink()
+
+    result = inbox_mod.cleanup_imported(
+        settings,
+        library_roots={client.library.id: client.library_root},  # type: ignore[attr-defined]
+    )
+    assert source.is_file()
+    assert result.deleted == 0
+    assert result.kept == 1
+
+
+def test_inbox_cleanup_never_touches_unimported_files(client: TestClient) -> None:
+    settings: Settings = client.settings  # type: ignore[attr-defined]
+    stray = _photo(settings.effective_inbox_path / "not-imported.JPG", 20)
+    result = inbox_mod.cleanup_imported(
+        settings,
+        library_roots={client.library.id: client.library_root},  # type: ignore[attr-defined]
+    )
+    assert result.deleted == 0
+    assert stray.is_file()
+
+
 def test_job_drops_file_that_changed_after_enqueue(client: TestClient) -> None:
     """入队后文件又被写入：执行时核对大小/mtime 不通过 → 本次不导入。"""
     settings: Settings = client.settings  # type: ignore[attr-defined]

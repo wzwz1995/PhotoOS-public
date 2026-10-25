@@ -3,35 +3,75 @@
  *
  * ## 这一页的定位
  *
- * 它把**功能怎么用、有什么限制**集中在一个地方，于是其余界面只需要说
- * "这一步要做什么"，不必在每块面板里铺一段说明书。这也是为什么这里可以
- * 用比较大的排版呼吸感 —— 别的页面都在做判断，只有这一页是给人读的。
+ * 它是整套界面里唯一「以读为主」的页面。别的页在帮用户做判断，这一页要把
+ * 操作顺序、边界和术语讲清楚。所以排版服从阅读：左侧固定目录、正文限宽、
+ * 小节之间留足呼吸，命令行默认收起。
  *
- * ## 排版取舍（都服从 DNA，不是随手写）
+ * ## 结构
  *
- * · **标题用衬线（Playfair Display）**：长文阅读场景，衬线比无衬线更容易"读进去"。
- * · **步骤用衬线数字 + 金色圆点**：DNA 明令禁止浏览器默认的 ul/ol 样式，
- *   所以这里全部手工重排（序号用衬线大字，没有默认圆点与缩进）。
- * · **限制条目用酒红细线**：限制是需要被看见的内容，用品牌点缀色标出来；
- *   但只用一条 2px 的左边线，不做整块红底（那会变成告警条，把限制渲染成错误）。
- * · **命令行块用等宽 + 深蓝底**：和「找照片」页里那段可复制命令同一套视觉，
- *   让用户认出"这是要照抄的东西"。
+ *   #help-body = 目录 + 正文两栏（窄屏退成一栏）
+ *   正文 = 第一次使用四步 → 按任务索引 → 分组功能详解 → 常见问题 / 术语表
+ *
+ * 所有颜色、字体、间距都走 tokens.css；本文件不定义新令牌。
  * ========================================================================== */
+
+/* 说明页需要比工作台更宽的两栏，但正文仍然限宽 —— 让目录和正文都有位置。 */
+/* ⚠️ 必须显式写 width：它是纵向 flex 的子项，而 auto 左右外边距会取消
+ * `align-items: stretch`。只写 max-width 时，面板会按内容宽度撑到 1240px，
+ * 在 1000px 视口里直接横向溢出（说明页右侧被裁掉）。
+ * 用视口百分比减两侧 gutter，既保留居中的最大宽度，又保证窄屏不越界。 */
+#view-help.view > .panel.wide {
+  width: min(1240px, calc(100% - 2 * var(--gutter)));
+  max-width: 1240px;
+  margin-left: auto;
+  margin-right: auto;
+  padding: var(--sp-6) var(--sp-7) var(--sp-7);
+}
+
+#help-body {
+  display: grid;
+  grid-template-columns: 252px minmax(0, 1fr);
+  gap: 0 40px;
+  align-items: start;
+}
 
 /* ------------------------------------------------------------------ 目录 */
 .help-toc {
-  border-bottom: 1px solid var(--ink-divider);
-  padding-bottom: 18px;
-  margin-bottom: 8px;
+  position: sticky;
+  top: var(--sp-3);
+  max-height: calc(100vh - var(--topbar-h) - var(--sp-7));
+  overflow: auto;
+  padding-right: 22px;
+  border-right: 1px solid var(--ink-divider);
+  scrollbar-width: thin;
 }
 
 .help-toc-head {
+  margin: 0 0 14px;
+  padding-left: 9px;
   font-family: var(--font-ui);
-  font-size: 11px;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-  color: var(--ink-text-2);
-  margin: 0 0 12px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  color: var(--ink-text-3);
+}
+
+.help-toc-group {
+  margin-top: 18px;
+}
+
+.help-toc-group:first-of-type {
+  margin-top: 0;
+}
+
+.help-toc-group-title {
+  margin: 0 0 6px;
+  padding-left: 9px;
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  color: var(--ink-text-3);
 }
 
 .help-toc-list {
@@ -39,116 +79,409 @@
   margin: 0;
   padding: 0;
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px 10px;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .help-toc-list li {
   margin: 0;
 }
 
-/* 目录项做成小卡片而不是默认链接：默认蓝下划线是本项目的禁忌之一。
- * ⚠️ 卡片样式必须挂在 `<a>` 上 —— 它才是那个盒子。
- * 早先把 `display:inline-flex` 加在了里面的 `<span class="help-toc-tab">` 上，
- * 于是外层 `<a>` 仍是行内元素、两个 span 直接叠在一起（截图里目录是糊成一团的）。
- * 这是 DOM 结构与样式对不上，不是配色问题。 */
 .help-toc-list a {
-  display: inline-flex;
+  display: flex;
   align-items: baseline;
   gap: 7px;
-  padding: 7px 13px;
-  border: 1px solid var(--ink-line);
-  border-radius: var(--r-pill);
-  background: var(--ink-panel-2);
+  padding: 6px 9px;
+  border-radius: var(--r-sm);
   color: var(--ink-text-2);
   text-decoration: none;
   font-family: var(--font-ui);
-  font-size: var(--fs-base);
-  white-space: nowrap;
-  transition: border-color var(--dur-base) var(--ease),
-              color var(--dur-base) var(--ease),
-              box-shadow var(--dur-base) var(--ease);
+  font-size: 13px;
+  line-height: 1.45;
+  transition: color var(--dur-fast) var(--ease),
+              background var(--dur-fast) var(--ease);
 }
 
-/* 键盘焦点必须看得见：只换文字颜色不够（实测这条是唯一一个没有焦点环的元素）。
- * 现在与全应用共用同一个焦点环令牌。 */
-.help-toc-list a:hover,
+.help-toc-list a:hover {
+  color: var(--ink-text);
+  background: var(--ink-panel-2);
+}
+
 .help-toc-list a:focus-visible {
-  color: var(--gold-500);          /* 金 = 高亮当前项，不是"更好" */
-  border-color: var(--gold-a45);
   outline: none;
   box-shadow: var(--focus-tight);
 }
 
-/* 前缀（"照片库""人物"……）：弱化成引路的小字，主角是后面的小节名。
- * 用次级色而非最弱一级 —— 它仍是要读的字（最弱一级在深底上低于 AA）。 */
+/* 当前阅读位置：金色高亮 = 当前项，不表示“更重要”。 */
+.help-toc-list a[aria-current="location"] {
+  color: var(--gold-500);
+  background: var(--gold-a05);
+}
+
 .help-toc-tab {
-  color: var(--ink-text-2);
-  font-size: 11px;
-  letter-spacing: 0.06em;
+  flex: none;
+  color: var(--ink-text-3);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+}
+
+.help-toc-list a[aria-current="location"] .help-toc-tab {
+  color: var(--gold-400);
 }
 
 .help-toc-title {
-  color: inherit;
+  min-width: 0;
 }
 
-/* ------------------------------------------------------------------ 分节 */
-.help-section {
-  padding: 30px 0 6px;
-  border-top: 1px solid var(--ink-divider);
-  margin-top: 26px;
-  scroll-margin-top: 18px;
+/* ------------------------------------------------------------------ 正文开场 */
+.help-main {
+  min-width: 0;
 }
 
-.help-section:first-of-type {
-  border-top: none;
-  margin-top: 8px;
+.help-intro {
+  padding: 2px 0 26px;
+  border-bottom: 1px solid var(--ink-divider);
 }
 
-.help-section h2 {
+.help-intro h2 {
+  margin: 0 0 16px;
+  /* 给中文标题留够一字不落一行的宽度；`ch` 在衬线字体里比汉字窄，
+   * 原来的 12ch 会把“始”挤到第二行。 */
+  max-width: 22ch;
   font-family: var(--font-display);
-  font-size: clamp(20px, 2.4vw, 27px);
+  font-size: clamp(2rem, 3.4vw, 3rem);
+  font-weight: 600;
+  line-height: 1.18;
+  letter-spacing: -0.01em;
+  color: var(--ink-text);
+  text-wrap: balance;
+}
+
+.help-intro-lede {
+  max-width: var(--measure-prose);
+  margin: 0 0 12px;
+  font-family: var(--font-ui);
+  font-size: 16px;
+  line-height: 1.9;
+  color: var(--ink-text-2);
+}
+
+.help-intro-note {
+  max-width: var(--measure-prose);
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 13.5px;
+  line-height: 1.85;
+  color: var(--ink-text-3);
+}
+
+.help-intro-note span {
+  color: var(--ink-text-2);
+  white-space: nowrap;
+}
+
+.help-intro-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.help-intro-actions .btn {
+  text-decoration: none;
+}
+
+/* 两条使用前必须知道的事实。不是警告条：不用红色，不抢正文。 */
+.help-safety {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px 26px;
+  margin: 24px 0 0;
+  padding: 16px 18px;
+  background: var(--royal-a06);
+  border: 1px solid var(--royal-600);
+  border-radius: var(--r-md);
+}
+
+.help-safety strong {
+  display: block;
+  margin-bottom: 5px;
+  font-family: var(--font-ui);
+  font-size: 13px;
   font-weight: 600;
   color: var(--ink-text);
-  margin: 0 0 var(--sp-1);
-  letter-spacing: 0.01em;
 }
 
-/* 标题下的金色短线：DNA 的招牌细节，也是"分节"的视觉锚点 */
-.help-section h2::after {
-  content: '';
-  display: block;
-  width: 46px;
-  height: 2px;
-  margin-top: 10px;
-  background: linear-gradient(90deg, var(--gold-500), rgba(244, 211, 94, 0));
+.help-safety p {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  line-height: 1.75;
+  color: var(--ink-text-2);
+}
+
+/* ------------------------------------------------------------------ 区块标题 */
+.help-block,
+.help-reference {
+  margin-top: 34px;
+  padding-top: 30px;
+  border-top: 1px solid var(--ink-divider);
+}
+
+.help-block-head h2 {
+  margin: 0 0 7px;
+  font-family: var(--font-display);
+  font-size: clamp(1.5rem, 2.4vw, 2rem);
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--ink-text);
+}
+
+.help-block-head p {
+  max-width: var(--measure-prose);
+  margin: 0 0 18px;
+  font-family: var(--font-ui);
+  font-size: 13.5px;
+  line-height: 1.8;
+  color: var(--ink-text-2);
+}
+
+/* ------------------------------------------------------------------ 第一次使用 */
+.help-start {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  counter-reset: help-start;
+}
+
+.help-start > li {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 16px;
+  padding: 20px 0;
+  border-top: 1px solid var(--ink-divider);
+}
+
+.help-start > li:first-child {
+  padding-top: 2px;
+  border-top: none;
+}
+
+.help-start-n {
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-style: italic;
+  line-height: 1;
+  color: var(--gold-500);
+  opacity: 0.9;
+  padding-top: 1px;
+}
+
+.help-start-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  margin-bottom: 7px;
+}
+
+.help-start-head h3 {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 15.5px;
+  font-weight: 600;
+  color: var(--ink-text);
+}
+
+.help-where {
+  flex: none;
+  padding: 1px 8px;
+  border: 1px solid rgba(123, 157, 219, 0.4);
+  border-radius: var(--r-pill);
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  color: var(--royal-200);
+  background: var(--royal-a10);
+}
+
+.help-start-body > p {
+  max-width: var(--measure-prose);
+  margin: 0 0 7px;
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--ink-text-2);
+}
+
+.help-start-body > .help-done {
+  margin-bottom: 0;
+  color: var(--ink-text-3);
+  font-size: 12.5px;
+}
+
+.help-done span {
+  margin-right: 8px;
+  color: var(--gold-500);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+}
+
+/* ------------------------------------------------------------------ 按任务索引 */
+.help-task-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 30px;
+}
+
+.help-task-list li {
+  margin: 0;
+  border-top: 1px solid var(--ink-divider);
+}
+
+.help-task-list a {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 11px 0;
+  color: var(--ink-text);
+  text-decoration: none;
+  transition: color var(--dur-fast) var(--ease);
+}
+
+.help-task-list a::after {
+  content: '→';
+  margin-left: auto;
+  color: var(--ink-text-3);
+  font-size: 13px;
+  transition: color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+}
+
+.help-task-list a:hover,
+.help-task-list a:focus-visible {
+  color: var(--gold-500);
+  outline: none;
+}
+
+.help-task-list a:hover::after,
+.help-task-list a:focus-visible::after {
+  color: var(--gold-500);
+  transform: translateX(2px);
+}
+
+.help-task-do {
+  min-width: 0;
+  font-family: var(--font-ui);
+  font-size: 13.5px;
+}
+
+.help-task-where {
+  flex: none;
+  color: var(--ink-text-3);
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  text-align: right;
+}
+
+/* ------------------------------------------------------------------ 功能详解 */
+.help-group {
+  margin-top: 34px;
+}
+
+.help-group-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--ink-line);
+}
+
+.help-group-head h2 {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  color: var(--gold-500);
+}
+
+.help-group-head p {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-text-3);
+}
+
+.help-section {
+  padding: 26px 0 28px;
+  border-top: 1px solid var(--ink-divider);
+  scroll-margin-top: 16px;
+}
+
+.help-group > .help-section:first-of-type {
+  border-top: none;
+}
+
+.help-section-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.help-tab {
+  flex: none;
+  padding: 1px 8px;
+  border: 1px solid var(--ink-line);
+  border-radius: var(--r-pill);
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: var(--ink-text-3);
+}
+
+.help-section-head h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(1.25rem, 2vw, 1.6rem);
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--ink-text);
 }
 
 .help-what {
+  max-width: var(--measure-prose);
+  margin: 0 0 18px;
   font-family: var(--font-ui);
-  font-size: 15px;
+  font-size: 14.5px;
   line-height: 1.85;
   color: var(--ink-text-2);
-  margin: 16px 0 20px;
-  max-width: var(--measure-prose);   /* 限宽是为了可读，不是为了对齐 */
 }
 
-.help-section h3,
-.help-label {
+.help-subhead {
+  margin: 22px 0 9px;
   font-family: var(--font-ui);
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
   color: var(--ink-text-3);
-  margin: 0 0 10px;
 }
 
-/* ------------------------------------------------------------------ 怎么做（步骤） */
+.help-subhead.is-limits {
+  color: var(--wine-400);
+}
+
 .help-how {
   list-style: none;
   counter-reset: help-step;
-  margin: 0 0 22px;
+  margin: 0;
   padding: 0;
   max-width: var(--measure-list);
 }
@@ -156,161 +489,334 @@
 .help-how li {
   counter-increment: help-step;
   position: relative;
-  padding: 0 0 0 42px;
-  margin: 0 0 11px;
+  padding-left: 34px;
+  margin: 0 0 9px;
   font-family: var(--font-ui);
   font-size: 14px;
   line-height: 1.8;
   color: var(--ink-text-2);
 }
 
-/* 序号：衬线数字（DNA 要求），金色，绝对定位到左侧 */
 .help-how li::before {
   content: counter(help-step);
   position: absolute;
   left: 0;
   top: 1px;
-  width: 26px;
+  width: 22px;
   text-align: right;
   font-family: var(--font-display);
-  font-size: 17px;
+  font-size: 16px;
   font-style: italic;
   color: var(--gold-500);
   opacity: 0.85;
 }
 
-/* ------------------------------------------------------------------ 限制 */
+/* 限制用一条酒红顶线 + 小圆点：表示“边界”，不是报警。 */
 .help-limits {
   list-style: none;
-  margin: 0 0 20px;
-  padding: 0;
+  margin: 0;
+  padding: 12px 0 0;
   max-width: var(--measure-list);
-  border-left: 2px solid rgba(216, 49, 91, 0.5);
+  border-top: 1px solid var(--wine-a32);
 }
 
 .help-limits li {
   position: relative;
-  padding: 2px 0 2px 20px;
-  margin: 0 0 9px;
+  padding: 0 0 0 15px;
+  margin: 0 0 7px;
   font-family: var(--font-ui);
-  font-size: var(--fs-base);
+  font-size: 13.5px;
   line-height: 1.8;
   color: var(--ink-text-2);
 }
 
-/* 手工圆点，不用默认 list-style（DNA：禁止任何 HTML 默认样式） */
 .help-limits li::before {
   content: '';
   position: absolute;
-  left: 8px;
-  top: 12px;
+  left: 3px;
+  top: 10px;
   width: 4px;
   height: 4px;
   border-radius: 50%;
-  background: var(--wine-600);
-  opacity: 0.85;
+  background: var(--wine-400);
+  opacity: 0.8;
 }
 
-/* ------------------------------------------------------------------ 命令行 */
-/* 「要照抄的东西」用墨底 + 等宽字 + 描边标出。
- *
- * ⚠️ 具体样式**已移到 phase2.css 的 `.cmd-block`**（`.help-cli` 是它的别名之一）。
- * 三个页面都要贴这种命令块，各写一遍的后果已经出现过：找照片那处修好了换行，
- * 人物与说明两处仍是坏的。同一个组件只留一份声明。 */
-.help-cli {
+/* 命令行默认收起：它是“想自己动手”的备选，不是操作步骤。 */
+.help-cli-wrap {
   max-width: var(--measure-code);
-  margin: 4px 0 20px;
+  margin-top: 18px;
+  border: 1px solid var(--ink-divider);
+  border-radius: var(--r-sm);
+  background: var(--ink-panel-2);
+  overflow: hidden;
+}
+
+.help-cli-wrap > summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  list-style: none;
+  cursor: pointer;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  color: var(--ink-text-3);
+}
+
+.help-cli-wrap > summary::-webkit-details-marker {
+  display: none;
+}
+
+.help-cli-wrap > summary:hover {
+  color: var(--ink-text-2);
+}
+
+.help-cli-wrap > summary:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-tight);
+}
+
+.help-cli-wrap[open] > summary {
+  border-bottom: 1px solid var(--ink-divider);
+}
+
+.help-cli-count {
+  margin-left: auto;
+  color: var(--ink-text-3);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.help-cli-wrap > summary::after {
+  content: '';
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-left: 2px;
+  border-right: 1.5px solid var(--ink-text-3);
+  border-bottom: 1.5px solid var(--ink-text-3);
+  transform: rotate(45deg);
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+.help-cli-wrap[open] > summary::after {
+  transform: rotate(-135deg);
+}
+
+/* .help-cli 的底色、等宽与横向滚动已在 phase2.css 统一；这里只去外边距。 */
+.help-cli-wrap > .help-cli {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  max-width: 100%;
+}
+
+/* ------------------------------------------------------------------ 常见问题 */
+.help-faq {
+  max-width: var(--measure-prose);
+}
+
+.help-faq details {
+  border-top: 1px solid var(--ink-divider);
+}
+
+.help-faq details:last-child {
+  border-bottom: 1px solid var(--ink-divider);
+}
+
+.help-faq summary {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 13px 0;
+  list-style: none;
+  cursor: pointer;
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--ink-text);
+}
+
+.help-faq summary::-webkit-details-marker {
+  display: none;
+}
+
+.help-faq summary::after {
+  content: '+';
+  margin-left: auto;
+  flex: none;
+  color: var(--ink-text-3);
+  font-family: var(--font-mono);
+  font-size: 15px;
+  transition: color var(--dur-fast) var(--ease);
+}
+
+.help-faq details[open] summary::after {
+  content: '−';
+  color: var(--gold-500);
+}
+
+.help-faq summary:hover {
+  color: var(--gold-500);
+}
+
+.help-faq summary:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-tight);
+}
+
+.help-faq details > p {
+  max-width: 62ch;
+  margin: 0;
+  padding: 0 0 16px 0;
+  font-family: var(--font-ui);
+  font-size: 13.5px;
+  line-height: 1.85;
+  color: var(--ink-text-2);
+}
+
+/* ------------------------------------------------------------------ 术语表 */
+.help-glossary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 34px;
+  margin: 0;
+}
+
+.help-glossary > div {
+  padding: 12px 0;
+  border-top: 1px solid var(--ink-divider);
+}
+
+.help-glossary dt {
+  margin-bottom: 4px;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-text);
+}
+
+.help-glossary dd {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  line-height: 1.75;
+  color: var(--ink-text-2);
 }
 
 /* ------------------------------------------------------------------ 页脚 */
 .help-version {
+  margin: 34px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--ink-divider);
   font-family: var(--font-mono);
   font-size: 11px;
-  color: var(--ink-text-2);
-  border-top: 1px solid var(--ink-divider);
-  padding-top: 14px;
-  margin-top: 34px;
+  color: var(--ink-text-3);
+}
+
+/* ------------------------------------------------------------------ 中等宽度：目录回到正文上方 */
+@media (max-width: 1100px) {
+  #help-body {
+    display: block;
+  }
+
+  /* 窄屏没有左栏，把目录压成一条可横向滚动的小导航：
+   * 不占掉第一屏的一半高度，也不把 18 个入口藏进折叠里。 */
+  .help-toc {
+    position: static;
+    max-height: none;
+    overflow-x: auto;
+    overflow-y: hidden;
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 6px;
+    padding: 0 0 12px;
+    margin-bottom: 18px;
+    border-right: 0;
+    border-bottom: 1px solid var(--ink-divider);
+    scrollbar-width: thin;
+  }
+
+  .help-toc-head,
+  .help-toc-group-title {
+    display: none;
+  }
+
+  .help-toc-group,
+  .help-toc-list {
+    display: contents;
+  }
+
+  .help-toc-list li {
+    flex: 0 0 auto;
+  }
+
+  .help-toc-list a {
+    padding: 5px 9px;
+    border: 1px solid var(--ink-line);
+    background: var(--ink-panel-2);
+    border-radius: var(--r-pill);
+    white-space: nowrap;
+  }
 }
 
 /* ------------------------------------------------------------------ 窄屏 */
-@media (max-width: 700px) {
-  .help-toc-list {
-    gap: 6px 8px;
+@media (max-width: 760px) {
+  #view-help.view > .panel.wide {
+    padding: var(--sp-5) var(--sp-4) var(--sp-6);
   }
 
-  .help-toc-tab {
-    padding: 6px 11px;
-    font-size: 12px;
+  .help-intro h2 {
+    font-size: 2rem;
+  }
+
+  .help-intro-lede {
+    font-size: 15px;
+  }
+
+  .help-intro-note span {
+    white-space: normal;
+  }
+
+  .help-intro-actions .btn {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+
+  .help-safety {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .help-task-list,
+  .help-glossary {
+    grid-template-columns: 1fr;
+  }
+
+  .help-task-where {
+    display: none;
+  }
+
+  .help-start > li {
+    grid-template-columns: 30px minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .help-start-n {
+    font-size: 23px;
   }
 
   .help-how li {
-    padding-left: 34px;
+    padding-left: 28px;
   }
 
   .help-how li::before {
-    width: 22px;
+    width: 18px;
     font-size: 15px;
   }
-}
 
-
-/* ============================================================================
- * 目录移到左栏（2026-10-18）
- *
- * 原来目录是页顶一整条、把正文往下推；说明页章节多，用户想跳转时还得
- * 先滚回顶部。改成两栏：目录固定在左、正文在右，滚动时目录跟着走。
- * 窄屏（<1000px）退回单栏，目录回到正文上方。
- */
-#help-body {
-  display: grid;
-  grid-template-columns: minmax(190px, 232px) minmax(0, 1fr);
-  gap: 10px 30px;
-  align-items: start;
-  align-content: start;   /* 同维护页：别让多余高度摊到每一行 */
-}#help-body { display: block; }
-#help-body > .help-toc {
-  float: left;
-  /* 右侧正文限宽（measure-prose ≈ 643px），一大片空白；
-     目录自己却被挤成 200px、长标题被截断。把左栏放宽到 300px 正好吃掉空白。 */
-  width: 300px;
-  margin: 0 40px 12px 0;
-  border-bottom: 0;
-}
-#help-body > .help-toc-list { display: flex; flex-direction: column; gap: 4px; }
-#help-body > :not(.help-toc) { margin-left: 340px; }
-@media (max-width: 1180px) {
-  #help-body > .help-toc { float: none; width: auto; margin: 0 0 12px;
-    border-bottom: 1px solid var(--ink-divider); padding-bottom: 12px; }
-  #help-body > :not(.help-toc) { margin-left: 0; }
-  #help-body > .help-toc-list { flex-direction: row; flex-wrap: wrap; gap: 8px 10px; }
-}
-#help-body > .help-toc {
-  grid-column: 1;
-  position: sticky;
-  top: 10px;
-  margin-bottom: 0;
-  padding-bottom: 0;
-  border-bottom: 0;
-  max-height: calc(100vh - 40px);
-  overflow: auto;
-}
-#help-body > .help-toc-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-#help-body > .help-section { grid-column: 2; }
-
-@media (max-width: 1000px) {
-  #help-body { display: block; }
-  #help-body > .help-toc {
-    position: static; max-height: none; margin-bottom: 12px;
-    padding-bottom: 12px; border-bottom: 1px solid var(--ink-divider);
+  .help-section {
+    padding: 22px 0 24px;
   }
-  #help-body > .help-toc-list { flex-direction: row; flex-wrap: wrap; gap: 8px 10px; }
 }
-
-/* 目录项占满左栏：原来是"按文字宽度的小胶囊"，300px 栏里参差不齐像没对齐 */
-#help-body > .help-toc .help-toc-list li { width: 100%; }
-#help-body > .help-toc .help-toc-list a { display: flex; width: 100%; box-sizing: border-box; }
-#help-body > .help-toc .help-toc-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

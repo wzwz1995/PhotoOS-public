@@ -172,13 +172,6 @@
  *     不再让目录折成三行、右侧留一片荒地。 */
 .panel.wide { max-width: none; }
 
-#view-help .panel.wide {
-  max-width: calc(var(--measure) + 460px);
-  margin-left: auto;
-  margin-right: auto;
-  padding: var(--sp-6) var(--sp-7) var(--sp-7);
-}
-
 /* ------------------------------------------------------------------ 页头（七个标签页共用）
  *
  * 之前同一个角色有四种做法：13px 的 `.panel h2`（找照片/人物/维护）、

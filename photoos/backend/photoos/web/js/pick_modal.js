@@ -227,8 +227,8 @@ function filterRowHtml() {
           <input type="search" id="pick-folder-keyword" placeholder="日期或目录名，例如 2026-10"
                  value="${escapeHtml(state.keyword)}">
         </label>
-        <label class="wb-field wb-grow"><span class="wb-label">时段 / Scene（就是你硬盘上的目录）</span>
-          <select id="pick-scene"><option value="">（先选一个 Scene）</option>
+        <label class="wb-field wb-grow"><span class="wb-label">时段 / 场景（对应硬盘上的目录）</span>
+          <select id="pick-scene"><option value="">（先选一个场景）</option>
             ${sceneOptionsHtml()}
           </select>
         </label>
@@ -237,7 +237,7 @@ function filterRowHtml() {
   const other = state.collections.filter((item) => Number(item.id) !== Number(state.targetId));
   return `
     <div class="wb-source-row">
-      <label class="wb-field wb-grow"><span class="wb-label">从哪个主题复制</span>
+      <label class="wb-field wb-grow"><span class="wb-label">从哪个主题挑选</span>
         <select id="pick-source-collection">
           <option value="">（选择一个主题）</option>
           ${other.map((item) => `
@@ -245,7 +245,7 @@ function filterRowHtml() {
               ${escapeHtml(item.name)}（${item.items} 张）</option>`).join('')}
         </select>
       </label>
-      <span class="wb-count">从别的主题<strong>复制</strong>成员到这里；原主题不受影响</span>
+      <span class="wb-count">把别的主题里的照片加到这里；原主题不受影响</span>
     </div>`;
 }
 
@@ -256,10 +256,10 @@ function sceneOptionsHtml() {
     if (needle && !String(scene.name || '').toLowerCase().includes(needle)) return false;
     return true;
   });
-  if (!list.length) return '<option value="">（没有匹配的 Scene）</option>';
+  if (!list.length) return '<option value="">（没有匹配的场景）</option>';
   return list.map((scene) => `
     <option value="${scene.id}" ${Number(scene.id) === Number(state.sceneId) ? 'selected' : ''}>
-      ${escapeHtml(scene.name)} — ${scene.shots} Shot
+      ${escapeHtml(scene.name)} — ${scene.shots} 组
     </option>`).join('');
 }
 

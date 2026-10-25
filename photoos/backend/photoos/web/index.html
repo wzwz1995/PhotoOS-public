@@ -277,6 +277,10 @@
       <div class="content">
         <div class="toolbar">
           <div class="summary" id="grid-summary">载入中…</div>
+          <button class="btn small ghost" id="shot-fold-toggle" type="button"
+                  title="同一个拍摄组的 JPG/RAW 折成一张卡；切回按文件可逐个查看">
+            按拍摄组
+          </button>
         </div>
 
         <!-- 「当前条件」：把左栏筛的东西、以及正在看的范围汇总成一行可逐个撤掉的芯片。
@@ -351,9 +355,8 @@
           <span class="view-head-note" id="search-total"></span>
         </div>
         <p class="hint">
-          两种找法用途不同：
-          <strong>按画面内容</strong>用来「找出所有某类照片」；
-          <strong>按时间 / 地点 / 场次</strong>用来「分出某一次拍摄」——后者是<strong>精确</strong>的。
+          <strong>按画面内容</strong>适合找「某类照片」；
+          <strong>按时间 / 地点 / 场次</strong>适合找「某一次拍摄」，结果精确、可复现。
         </p>
 
         <!-- 「当前条件」：两种找法共用同一条 —— 内容模式显示搜索词，
@@ -371,9 +374,13 @@
           <div class="search-bar">
             <select id="search-pick" class="search-pick" aria-label="选择要找的东西"></select>
             <input id="search-input" class="search-input" type="search"
-                   placeholder="或直接打一个词（需先在命令行准备）" autocomplete="off">
+                   placeholder="或输入一个想找的词" autocomplete="off"
+                   aria-label="输入一个想找的搜索词">
             <button class="btn primary" id="search-go">搜索</button>
+            <button class="btn small ghost" id="search-manage" type="button"
+                    title="查看每个画面词的结果是否过期、补算新照片向量">管理关键词</button>
           </div>
+          <div id="search-coverage" class="hint tiny" hidden></div>
           <div id="search-learning"></div>
           <div id="search-summary"></div>
           <div id="search-results" class="search-results"></div>
@@ -385,8 +392,7 @@
         <!-- ---------- 模式二：按时间 / 地点 / 场次（确定性） ---------- -->
         <div id="mode-when" hidden>
           <p class="hint tiny">
-            这一层查的是<strong>目录与拍摄时间</strong>，不经过任何模型，
-            所以<strong>不会混进别的城市或别的年份</strong>。
+            只查<strong>目录与拍摄时间</strong>，不经过模型；结果确定，可复现。
           </p>
           <div class="find-form">
             <label>城市
@@ -402,7 +408,7 @@
             <label>到
               <input id="find-to" type="date">
             </label>
-            <label>最少 Shot
+            <label>最少拍摄组
               <input id="find-min-shots" type="number" min="1" placeholder="不限">
             </label>
             <button class="btn primary" id="find-go">筛选</button>
@@ -471,15 +477,13 @@
       <div class="panel wide">
         <h2>导入新照片</h2>
         <p class="hint">
-          选择原始素材目录 → <strong>预演</strong> → 确认后执行。
-          照片与视频会按拍摄时间与 GPS 归入 <code>&lt;城市&gt;\&lt;时段&gt;\</code>。
-          <strong>源文件只被读取，不会被移动、改名或删除。</strong>
-          「选目录…」只在<strong>桌面版</strong>可用；在浏览器里请直接粘贴目录路径。
+          照片会<strong>复制</strong>进库，并按拍摄时间和地点归入
+          <code>&lt;城市&gt;\&lt;时段&gt;\</code>；源文件只读。
+          先<strong>预演</strong>确认落点，再执行。
         </p>
         <p class="hint tiny">
-          「预演抽样」只决定<strong>预演看多少个</strong>；点「确认执行」会处理源里的全部文件。
-          相机没连手机定位时整段都没有 GPS，境外拍摄的坐标也可能不在离线缓存里 ——
-          这两种情况请填<strong>强制城市</strong>，它会压过 GPS 判定。
+          预演只检查前 N 个文件；确认执行会处理全部。没有 GPS 时填<strong>强制城市</strong>。
+          「选目录…」仅桌面版可用；浏览器里请粘贴目录路径。
         </p>
         <div class="row import-form">
           <label class="field grow">
@@ -526,40 +530,49 @@
           <div id="import-task" class="import-task" hidden></div>
       </div>
 
-      <div class="panel wide" id="inbox-panel">
-        <h2>从手机导入（收件箱）</h2>
-        <p class="hint">
-          不用直连手机：在资源管理器里把手机里的照片<strong>复制</strong>到下面的收件箱文件夹，
-          PhotoOS 会等文件复制完成后再导入。<strong>收件箱里的文件只会被读取，不会被移动、改名或删除。</strong>
-        </p>
-        <div class="row" id="import-inbox-row">
-          <label class="field grow">
-            <span>收件箱</span>
-            <input id="inbox-path" type="text" readonly
-                   title="把手机照片复制到这里；导入只读取，不改动这里的文件">
-          </label>
-          <button class="btn small" id="inbox-open" type="button">打开收件箱</button>
-          <button class="btn" id="inbox-scan" type="button">扫描</button>
-          <button class="btn primary" id="inbox-import" type="button" disabled>立即导入</button>
-        </div>
-        <div id="inbox-target" class="hint tiny"></div>
-        <div id="inbox-confirm" class="notice inline-confirm" hidden>
-          <div id="inbox-confirm-text"></div>
-          <div class="row inline-confirm-actions">
-            <button class="btn primary" id="inbox-confirm-yes" type="button">确认导入</button>
-            <button class="btn" id="inbox-confirm-no" type="button">取消</button>
+      <details class="maint-group" id="inbox-panel">
+        <summary><span><b>从手机导入（收件箱）</b><em id="inbox-summary">正在读取…</em></span></summary>
+        <div class="maint-body">
+          <p class="hint">
+            把手机照片<strong>复制</strong>到收件箱，等文件不再变化后再导入。
+            默认只读；勾选清理后只删已安全入库的副本，手机不动。
+          </p>
+          <div class="row" id="import-inbox-row">
+            <label class="field grow">
+              <span>收件箱</span>
+              <input id="inbox-path" type="text" readonly
+                     title="把手机照片复制到这里；导入只读取，不改动这里的文件">
+            </label>
+            <button class="btn small" id="inbox-open" type="button">打开收件箱</button>
+            <button class="btn" id="inbox-scan" type="button">扫描</button>
+            <button class="btn primary" id="inbox-import" type="button" disabled>立即导入</button>
+            <button class="btn small ghost" id="inbox-cleanup-now" type="button" disabled
+                    title="删除台账可核对、目标仍在库里的收件箱副本；不会动手机与照片库">
+              清理已入库…
+            </button>
           </div>
+          <div id="inbox-target" class="hint tiny"></div>
+          <label class="check" id="inbox-cleanup-row"
+                 title="只删除台账可核对、目标仍在库里的收件箱副本；失败或无法核对的文件保留，手机与照片库不受影响">
+            <input type="checkbox" id="inbox-cleanup" checked>
+            <span>导入成功后清理收件箱里已安全入库的副本</span>
+          </label>
+          <div id="inbox-confirm" class="notice inline-confirm" hidden>
+            <div id="inbox-confirm-text"></div>
+            <div class="row inline-confirm-actions">
+              <button class="btn primary" id="inbox-confirm-yes" type="button">确认导入</button>
+              <button class="btn" id="inbox-confirm-no" type="button">取消</button>
+            </div>
+          </div>
+          <div id="inbox-status" class="hint inbox-status"></div>
         </div>
-        <div id="inbox-status" class="hint inbox-status"></div>
-      </div>
+      </details>
 
       <details class="maint-group" id="adb-group">
         <summary><span><b>从手机导入（ADB，可选）</b><em>批量拉取；需要手机打开 USB 调试</em></span></summary>
         <div class="maint-body">
           <p class="hint">
-            装了 Android Platform-Tools（adb）就不用手动复制：直接把手机目录拉到收件箱。
-            <strong>手机上的文件只被读取，不会被删除或移动。</strong>
-            没装 adb 也不影响使用 —— 上面的收件箱照样能导入。
+            用 adb 把手机目录拉到收件箱，手机文件只读。没装 adb 不影响上面的收件箱导入。
           </p>
           <div class="row" id="adb-row">
             <label class="field">
@@ -596,9 +609,8 @@
   <summary><span><b>废片清理</b><em>标记后统一移入回收站（可还原）</em></span></summary>
   <div class="maint-body">
     <p class="hint">
-      在照片详情里点「标记为废片」。清理只处理<strong>已标记</strong>的照片，
-      并把它们<strong>移入 Windows 回收站</strong>（可从回收站还原），
-      <strong>不做永久删除</strong>；命中精选/主题的照片会被跳过。
+      只清理你在照片详情里<strong>标记为废片</strong>的照片：移入 Windows 回收站，可还原，不永久删除。
+      命中精选或主题的照片会跳过。
     </p>
     <div class="row" id="reject-row">
       <button class="btn small" id="reject-refresh" type="button">刷新</button>
@@ -616,18 +628,18 @@
   </div>
 </details>
 
-<details class="maint-group" open>
-  <summary><span><b>分组与阈值</b><em>切分规则与相似度；改完点「现在分组」才生效</em></span></summary>
+<details class="maint-group">
+  <summary><span><b>分组与阈值</b><em>高级：调整场景切分与相似度</em></span></summary>
       <div class="maint-body">
         <div class="panel-head">
-          <h2>Scene 划分阈值</h2>
+          <h2>场景划分阈值</h2>
           <div>
             <button class="btn primary small" id="btn-scene-config-save">保存</button>
           </div>
         </div>
         <p class="hint">
-          Scene 是"一次能筛完的一组照片"。自动切分不准时先调这里；只想改某一两场，
-          就去精选页用「并入前一场 / 从当前张拆开」。
+          场景是「一次能筛完的一组照片」。自动切分不准时再调；只改某一两场，
+          优先用精选页的「并入前一场 / 从当前张拆开」。
         </p>
         <div class="row">
           <div class="field inline">
@@ -658,7 +670,7 @@
            浏览器只能选一个 action id —— 这里没有"执行任意命令"的入口。 -->
 </details>
 <details class="maint-group" open>
-  <summary><span><b>数据维护</b><em>完整性检查、备份、重复报告，以及可在界面直跑的命令</em></span></summary>
+  <summary><span><b>数据维护</b><em>完整性检查、备份与版本迁移</em></span></summary>
       <div class="maint-body">
         <h2>完整性与备份</h2>
         <div class="row">
@@ -669,8 +681,6 @@
         <pre class="output" id="tools-output">（结果会显示在这里）</pre>
       </div>
 
-      <!-- Scene 划分阈值：改这里 → 下次 `scenes rebuild`（界面上是「现在分组」）
-           就按新阈值切。保存只写 data/config.json 里的这几项，不动其它配置。 -->
       <div class="maint-body">
         <div class="migrate-block">
           <div class="row">
@@ -685,14 +695,25 @@
         <div class="panel-head">
           <h2>命令（界面直跑）</h2>
           <div>
-            <button class="btn small" id="btn-actions-dialog">在弹窗里挑一条…</button>
+            <button class="btn small" id="btn-actions-dialog">打开命令面板…</button>
           </div>
         </div>
-        <div id="actions-panel" class="actions-panel"></div>
+        <p class="hint tiny">
+          命令由服务端固定，只能选、不能改参数。执行走后台任务，关掉页面不会中断。
+        </p>
+
+        <!-- 命令目录很长（17 条），默认收起；需要完整列表时再展开。
+             常用入口是上面的「打开命令面板…」弹窗。 -->
+        <details class="maint-subgroup" id="actions-details">
+          <summary>
+            <span><b>全部命令</b><em id="actions-summary">正在读取命令目录…</em></span>
+          </summary>
+          <div id="actions-panel" class="actions-panel"></div>
+        </details>
       </div>
 
 </details>
-<details class="maint-group" open>
+<details class="maint-group">
   <summary><span><b>数据根</b><em>数据库、缩略图、备份放在哪个目录</em></span></summary>
   <div class="maint-body">
     <div class="dataroot-now">
@@ -711,8 +732,8 @@
     <p class="hint tiny" id="dataroot-hint">切换后需要重启应用才生效（避免两个进程写同一个库）。</p>
   </div>
 </details>
-<details class="maint-group" open>
-  <summary><span><b>AI 组件</b><em>按需下载：装了才有语义搜索与人脸；下载源可改</em></span></summary>
+<details class="maint-group">
+  <summary><span><b>AI 组件</b><em>按需下载：语义搜索与人脸识别依赖它</em></span></summary>
   <div class="maint-body">
     <div id="ai-components" class="ai-components"></div>
     <div class="row ai-tools">
@@ -738,7 +759,7 @@
     </div>
   </div>
 </details>
-<details class="maint-group" open>
+<details class="maint-group">
   <summary><span><b>离线与库状态</b><em>换盘重绑定、当前库的健康摘要</em></span></summary>
       <div class="maint-body">
         <h2>离线照片库</h2>

@@ -64,6 +64,7 @@ const state = {
   tuned: false,
   tuning: null,
   showTuning: true,       // 是否套用"按我的修改重排"
+  onlyConfirmed: true,    // 找照片默认只显示已确认「我要这种」的卡片
   cities: [],
   cli: {                    // 命令行前缀（服务端给；见 refreshSearch 的说明）
     search: ['photoos search 日出 --save'],
@@ -83,6 +84,13 @@ const state = {
    * 抄这一份之后，条件条反映的永远是**上一次真正执行的查询**。
    */
   find: null,             // { city, session, from, to, minShots } | null
+  manage: null,           // /api/semantic/manage 的快照
+  scene: null,            // 当前打开的场景摘要（/api/semantic/scenes/{id}）
+  sceneItems: [],         // 当前这一轮 60 张
+  sceneBusy: false,
+  sceneBatchBusy: false,
+  manageSelected: new Set(),
+  manageBusy: false,
 };
 
 export function initSearch() {
@@ -101,11 +109,14 @@ export function initSearch() {
 
   $('#search-go').addEventListener('click', () => {
     const typed = String($('#search-input').value || '').trim();
-    if (!typed) {
-      toast('请先选一个，或在输入框里打一个词', true);
+    // 下拉框里的预置词也是"已经选好的词"。以前只认输入框，于是用户明明
+    // 在下拉框里选了「月亮」，点搜索却弹「请先选一个」—— 提示与眼前的事实相反。
+    const picked = String($('#search-pick').value || '').trim();
+    if (!typed && !picked) {
+      toast('先选一个预置搜索词，或在输入框里输入一个词', true);
       return;
     }
-    searchBy(typed);
+    searchBy(typed || picked);
   });
 
   $('#search-input').addEventListener('keydown', (event) => {
@@ -131,6 +142,10 @@ export function initSearch() {
     });
   });
   $('#find-city').addEventListener('change', () => runFind());
+
+  if ($('#search-manage')) {
+    $('#search-manage').addEventListener('click', () => openSemanticManage());
+  }
 
   // 预热命令目录：不进 await（不阻塞这一页的首屏），但要在用户碰到
   // "这个词没准备过"之前拿到 —— 那个空态里的「立即准备」按钮靠它决定是否可用。
@@ -263,10 +278,12 @@ export async function refreshSearch() {
       }).catch(() => {}),
       API.get('/api/semantic/queries').then((payload) => {
         state.queries = payload.items || [];
+        state.queriesTopHits = Number(payload.top_hits || 200);
         renderPicker(payload.note);
         state.queriesNote = payload.note || '';
       }),
     ]);
+    await loadManageCoverage();
     if (!state.queries.length) {
       // ★ 不要让下拉"静静地空着"—— 那看起来就像功能坏了。
       // 常见原因是库还没升级到最新 schema，或者一个字都还没准备。
@@ -319,16 +336,762 @@ export async function refreshSearch() {
   }
 }
 
+/**
+ * 画面词覆盖状态：新照片没向量、词命中停在旧日期，都必须在搜索页说清楚。
+ * 失败时静默隐藏；管理入口仍可打开，由弹窗自己报错。
+ */
+async function loadManageCoverage() {
+  const hint = $('#search-coverage');
+  const button = $('#search-manage');
+  try {
+    const data = await API.get('/api/semantic/manage');
+    state.manage = data;
+    const cov = data.coverage || {};
+    const missingPhotos = Number(cov.missing_photo || 0);
+    const stale = (data.items || []).filter((item) => item.stale).length;
+    if (hint) {
+      // 主搜索栏只说“照片”。视频缺 preview 是视频库自己的事，不能写成
+      // “还有 N 张照片缺预览”——那会让用户以为照片搜索结果坏了。
+      if (missingPhotos > 0) {
+        hint.hidden = false;
+        const canEmbed = Number(cov.missing_with_preview_photo || 0);
+        hint.innerHTML = `<span class="warn-text">还有 <strong>${missingPhotos}</strong> 张照片尚未参与画面搜索`
+          + (canEmbed > 0 ? `（可补 ${canEmbed} 张）` : '（缺 preview）')
+          + `；打开「管理关键词」查看覆盖与下一步。</span>`;
+      } else if (stale > 0) {
+        hint.hidden = false;
+        hint.textContent = `${stale} 个词的结果早于最新入库照片，可以重算候选。`;
+      } else {
+        hint.hidden = true;
+        hint.textContent = '';
+      }
+    }
+    if (button) {
+      button.textContent = missingPhotos > 0
+        ? `管理关键词 · ${missingPhotos} 待补`
+        : '管理关键词';
+      button.title = missingPhotos > 0
+        ? `${missingPhotos} 张照片尚未参与搜索；点开查看覆盖与下一步`
+        : '查看关键词覆盖、重算候选或补算新照片向量';
+    }
+  } catch {
+    if (hint) { hint.hidden = true; hint.textContent = ''; }
+    if (button) button.textContent = '管理关键词';
+  }
+}
+
+function ensureSemanticManage() {
+  let node = $('#semantic-manage');
+  if (node) return node;
+  node = document.createElement('div');
+  node.id = 'semantic-manage';
+  node.className = 'semantic-manage';
+  node.hidden = true;
+  node.innerHTML = `
+    <div class="semantic-manage-backdrop" data-sm-close></div>
+    <section class="semantic-manage-panel" role="dialog" aria-modal="true"
+             aria-labelledby="sm-title">
+      <header class="semantic-manage-head">
+        <span>
+          <h2 id="sm-title">关键词工作台</h2>
+          <p class="hint tiny">先看覆盖，再决定是“重算候选”（秒级）还是“补画面向量”（后台）。</p>
+        </span>
+        <button class="btn small" type="button" data-sm-close>关闭</button>
+      </header>
+      <div class="semantic-manage-body" id="sm-body"></div>
+      <footer class="semantic-manage-foot">
+        <div id="sm-progress" class="semantic-manage-progress"></div>
+        <span class="hint tiny" id="sm-selected">未选关键词</span>
+        <span class="spacer"></span>
+        <button class="btn small" id="sm-refresh" type="button" disabled>重算选中候选</button>
+        <button class="btn small primary" id="sm-backfill" type="button" hidden>补算新照片向量…</button>
+      </footer>
+    </section>`;
+  document.body.appendChild(node);
+  node.addEventListener('click', (event) => {
+    if (event.target.closest('[data-sm-close]')) closeSemanticManage();
+    if (event.target.closest('#sm-refresh')) refreshSelectedHits();
+    if (event.target.closest('#sm-backfill')) backfillSemanticVectors();
+    if (event.target.closest('#sm-add')) addSemanticKeyword();
+    const sceneButton = event.target.closest('[data-sm-scene]');
+    if (sceneButton) openSceneReview(Number(sceneButton.dataset.smScene));
+    const promptButton = event.target.closest('[data-sm-prompt]');
+    if (promptButton) editSemanticPrompt(Number(promptButton.dataset.smPrompt));
+  });
+  node.addEventListener('change', (event) => {
+    const id = event.target.dataset.smId;
+    if (id) toggleManageSelected(Number(id), Boolean(event.target.checked));
+    if (event.target.id === 'sm-all') {
+      const all = (state.manage?.items || []).map((item) => Number(item.id));
+      state.manageSelected = event.target.checked ? new Set(all) : new Set();
+      renderManageTable();
+    }
+  });
+  return node;
+}
+
+async function openSemanticManage() {
+  ensureSemanticManage();
+  $('#semantic-manage').hidden = false;
+  await reloadManage();
+}
+
+function closeSemanticManage() {
+  const node = $('#semantic-manage');
+  if (node) node.hidden = true;
+}
+
+// ---------------------------------------------------------------- 场景挖掘
+//
+// 关键词工作台负责“覆盖/命中”；场景复核页负责“按识别线挖 60 张并逐张确认”。
+// 标签复用 /api/semantic/feedback（keep = 是这个场景，drop = 不是），
+// 所以标签立即沉淀，下一轮挖掘和搜索重排使用同一份真源。
+
+function ensureSceneReview() {
+  let node = $('#scene-review');
+  if (node) return node;
+  node = document.createElement('section');
+  node.id = 'scene-review';
+  node.className = 'scene-review';
+  node.hidden = true;
+  node.innerHTML = `
+    <div class="scene-review-backdrop" data-scene-close></div>
+    <div class="scene-review-panel" role="dialog" aria-modal="true" aria-labelledby="scene-review-title">
+      <header class="scene-review-head">
+        <span>
+          <h2 id="scene-review-title">场景挖掘</h2>
+          <p class="hint tiny" id="scene-review-sub">人工确认会立即沉淀到场景；新照片下一轮自动参与。</p>
+        </span>
+        <button class="btn small" type="button" data-scene-close>关闭</button>
+      </header>
+      <div class="scene-review-body">
+        <div class="scene-review-stats" id="scene-review-stats"></div>
+        <div class="scene-suggestion" id="scene-suggestion"></div>
+        <div class="scene-review-controls">
+          <label class="scene-threshold-label" for="scene-threshold">
+            识别线
+            <input type="range" id="scene-threshold" min="0.40" max="0.99" step="0.01" value="0.70">
+            <span class="mono" id="scene-threshold-value">0.70</span>
+          </label>
+          <button class="btn primary" id="scene-discover" type="button">发现下一批</button>
+          <span class="scene-batch">
+            <button class="btn small gold" id="scene-batch-keep" type="button"
+                    title="只处理本批尚未标记的照片">本批剩余全部是</button>
+            <button class="btn small" id="scene-batch-drop" type="button"
+                    title="只处理本批尚未标记的照片">本批剩余全部不是</button>
+          </span>
+        </div>
+        <p class="hint tiny" id="scene-review-hint"></p>
+        <div class="scene-review-grid" id="scene-review-grid"></div>
+      </div>
+    </div>`;
+  document.body.appendChild(node);
+  node.addEventListener('click', (event) => {
+    if (event.target.closest('[data-scene-close]')) closeSceneReview();
+    if (event.target.closest('#scene-discover')) discoverSceneBatch();
+    if (event.target.closest('#scene-batch-keep')) labelSceneBatch('keep');
+    if (event.target.closest('#scene-batch-drop')) labelSceneBatch('drop');
+    if (event.target.closest('#scene-use-recommended')) useRecommendedSceneLine();
+    const open = event.target.closest('[data-scene-open]');
+    if (open) {
+      event.preventDefault();
+      openSceneAsset(Number(open.dataset.sceneOpen));
+      return;
+    }
+    const label = event.target.closest('[data-scene-label]');
+    if (label) {
+      const card = label.closest('[data-scene-shot]');
+      if (card) labelSceneShot(Number(card.dataset.sceneShot), label.dataset.sceneLabel);
+    }
+  });
+  const slider = node.querySelector('#scene-threshold');
+  if (slider) {
+    slider.addEventListener('input', () => {
+      const value = node.querySelector('#scene-threshold-value');
+      if (value) value.textContent = Number(slider.value).toFixed(2);
+      const hint = node.querySelector('#scene-review-hint');
+      if (hint) hint.textContent = '识别线已改；点「发现下一批」才会按新线取候选。';
+    });
+  }
+  return node;
+}
+
+function closeSceneReview() {
+  const node = $('#scene-review');
+  if (node) node.hidden = true;
+}
+
+async function openSceneReview(queryId) {
+  ensureSceneReview();
+  state.scene = null;
+  state.sceneItems = [];
+  const node = $('#scene-review');
+  node.hidden = false;
+  const title = node.querySelector('#scene-review-title');
+  if (title) title.textContent = '场景挖掘';
+  const grid = node.querySelector('#scene-review-grid');
+  if (grid) grid.innerHTML = loadingHtml('正在读取场景状态…');
+  try {
+    const data = await API.get(`/api/semantic/scenes/${encodeURIComponent(queryId)}`);
+    state.scene = data;
+    state.sceneItems = [];
+    const slider = node.querySelector('#scene-threshold');
+    if (slider) slider.value = String(data.threshold ?? 0.70);
+    const value = node.querySelector('#scene-threshold-value');
+    if (value) value.textContent = Number(data.threshold ?? 0.70).toFixed(2);
+    if (title) title.textContent = `场景：${data.query_text || `#${queryId}`}`;
+    renderSceneStatus();
+    if (grid) {
+      grid.innerHTML = '<p class="notice">点「发现下一批」，按当前识别线挖 60 张。</p>';
+    }
+  } catch (error) {
+    if (grid) grid.innerHTML = `<p class="notice">场景状态读取失败：${escapeHtml(error.message)}</p>`;
+    toast(`场景读取失败：${error.message}`, true);
+  }
+}
+
+function renderSceneStatus() {
+  const node = $('#scene-review');
+  const data = state.scene;
+  if (!node || !data) return;
+  const stats = node.querySelector('#scene-review-stats');
+  const hint = node.querySelector('#scene-review-hint');
+  const suggestion = node.querySelector('#scene-suggestion');
+  const targets = data.targets || {};
+  if (stats) {
+    stats.innerHTML = `
+      <div><span>已确认</span><strong>是 ${Number(data.confirmed_keep || 0)} · 不是 ${Number(data.confirmed_drop || 0)}</strong></div>
+      <div><span>识别线以上未确认</span><strong>${Number(data.above_line || 0).toLocaleString()}</strong></div>
+      <div><span>未确认总量</span><strong>${Number(data.unconfirmed || 0).toLocaleString()}</strong></div>
+      <div><span>轮次</span><strong>${Number(data.round || 0)}</strong></div>`;
+  }
+  if (suggestion) {
+    const rec = data.recommended;
+    const current = Number(data.threshold || 0);
+    if (rec && Math.abs(Number(rec.threshold) - current) >= 0.005) {
+      const low = current < Number(rec.threshold);
+      const unconfirmedAtRec = Number(rec.unconfirmed_above || 0);
+      suggestion.className = `scene-suggestion${low ? ' is-warn' : ''}`;
+      if (unconfirmedAtRec < 20) {
+        suggestion.innerHTML = `
+          <span><strong>高分区间已经基本筛完。</strong>
+            建议线 ${Number(rec.threshold).toFixed(3)} 以上只剩 ${unconfirmedAtRec} 张未确认；
+            当前线以上还有 ${Number(data.above_line || 0).toLocaleString()} 张，但大多是分数明显更低的未确认照片。
+            继续拉低识别线会带进大量无关结果。
+          </span>`;
+      } else {
+        suggestion.innerHTML = `
+          <span>${low ? '当前识别线偏低，会带进大量无关照片。' : '按已确认标签估算，建议识别线：'}
+            <strong>${Number(rec.threshold).toFixed(3)}</strong>
+            <span class="hint tiny">（估算精确率 ${(Number(rec.precision) * 100).toFixed(0)}% · 覆盖 ${(Number(rec.recall) * 100).toFixed(0)}%，基于 ${Number(rec.positive_labels)} 正 / ${Number(rec.negative_labels)} 负；建议线以上未确认 ${unconfirmedAtRec} 张）</span>
+          </span>
+          <button class="btn small gold" id="scene-use-recommended" type="button">用建议线</button>`;
+      }
+    } else {
+      suggestion.className = 'scene-suggestion';
+      suggestion.innerHTML = '';
+    }
+  }
+  if (hint) {
+    const phase = data.phase === 'warmup'
+      ? `前 3 轮：${Number(targets.uncertain ?? 40)} 不确定 + ${Number(targets.certain ?? 20)} 确定`
+      : `之后：${Number(targets.certain ?? 40)} 确定，确定不足用不确定补`;
+    const roundNo = Number(data.round || 0);
+    const roundLabel = data.items
+      ? `第 ${roundNo} 轮`
+      : `下一轮：第 ${roundNo + 1} 轮`;
+    hint.textContent = `${roundLabel} · ${phase}`
+      + ` · 当前线以上 ${Number(data.above_line || 0).toLocaleString()} 张，本轮只取 ${Number(data.items ? data.selected : (data.phase === 'warmup' ? 60 : 40))} 张`
+      + (data.mode === 'text' ? ' · 冷启动（还没有正例标签）' : ' · 场景模型（正/负例均值）');
+  }
+}
+
+function useRecommendedSceneLine() {
+  const rec = state.scene && state.scene.recommended;
+  if (!rec) return;
+  const slider = $('#scene-threshold');
+  const value = $('#scene-threshold-value');
+  if (slider) slider.value = String(rec.threshold);
+  if (value) value.textContent = Number(rec.threshold).toFixed(2);
+  const hint = $('#scene-review-hint');
+  if (hint) hint.textContent = `已设为建议线 ${Number(rec.threshold).toFixed(2)}；点「发现下一批」生效。`;
+}
+
+async function discoverSceneBatch() {
+  if (state.sceneBusy || !state.scene) return;
+  const node = $('#scene-review');
+  const button = node && node.querySelector('#scene-discover');
+  const slider = node && node.querySelector('#scene-threshold');
+  const grid = node && node.querySelector('#scene-review-grid');
+  state.sceneBusy = true;
+  if (button) { button.disabled = true; button.textContent = '发现中…'; }
+  if (grid) grid.innerHTML = loadingHtml('正在给全库打分并抽取候选…');
+  try {
+    const threshold = slider ? Number(slider.value) : 0.70;
+    const data = await API.post(
+      `/api/semantic/scenes/${encodeURIComponent(state.scene.query_id)}/discover`,
+      { threshold },
+    );
+    state.scene = data;
+    state.sceneItems = data.items || [];
+    renderSceneStatus();
+    renderSceneItems();
+    const value = node && node.querySelector('#scene-threshold-value');
+    if (value) value.textContent = Number(data.threshold ?? threshold).toFixed(2);
+    if (slider) slider.value = String(data.threshold ?? threshold);
+  } catch (error) {
+    if (grid) grid.innerHTML = `<p class="notice">发现失败：${escapeHtml(error.message)}</p>`;
+    toast(`发现失败：${error.message}`, true);
+  } finally {
+    state.sceneBusy = false;
+    if (button) { button.disabled = false; button.textContent = '发现下一批'; }
+  }
+}
+
+function renderSceneItems() {
+  const node = $('#scene-review');
+  const grid = node && node.querySelector('#scene-review-grid');
+  if (!grid) return;
+  const items = state.sceneItems || [];
+  if (!items.length) {
+    grid.innerHTML = '<p class="notice">当前识别线下没有未确认候选。新照片入库后还会继续出现。</p>';
+    return;
+  }
+  grid.innerHTML = items.map((item) => {
+    const band = item.band === 'certain' ? '确定' : (item.band === 'uncertain' ? '不确定' : '线附近');
+    const bandClass = item.band === 'certain' ? 'is-certain' : (item.band === 'uncertain' ? 'is-uncertain' : 'is-near');
+    return `
+      <figure class="scene-card" data-scene-shot="${item.shot_id}">
+        <button class="scene-open" type="button" data-scene-open="${item.asset_id}"
+                title="点图看大图和原片信息" aria-label="看大图">
+          <img ${assetImgAttrs({ assetId: item.asset_id })}>
+          <span class="scene-open-cue">看大图</span>
+        </button>
+        <figcaption>
+          <div class="scene-card-top">
+            <span class="scene-band ${bandClass}">${band}</span>
+            <span class="scene-score mono">${Number(item.score || 0).toFixed(3)}</span>
+          </div>
+          <div class="search-when"><span>${escapeHtml(dayPart(item.capture_at))}</span>
+            <span class="search-hour">${escapeHtml(hourPart(item.capture_at))}</span></div>
+          <div class="scene-card-path" title="${escapeHtml(item.relative_path || '')}">
+            ${escapeHtml(baseName(item.relative_path || '') || `#${item.asset_id}`)}
+          </div>
+          <div class="scene-card-actions">
+            <button class="btn small gold" type="button" data-scene-label="keep">是</button>
+            <button class="btn small" type="button" data-scene-label="drop">不是</button>
+          </div>
+        </figcaption>
+      </figure>`;
+  }).join('');
+}
+
+async function openSceneAsset(assetId) {
+  if (!assetId) return;
+  const app = await import('./app.js');
+  await app.openAssetDetail(Number(assetId));
+}
+
+async function labelSceneBatch(action) {
+  const scene = state.scene;
+  if (!scene || state.sceneBatchBusy || !['keep', 'drop'].includes(action)) return;
+  const pending = (state.sceneItems || []).filter((item) => !item.label);
+  if (!pending.length) {
+    toast('本批没有未标记的照片');
+    return;
+  }
+  state.sceneBatchBusy = true;
+  const buttons = [...document.querySelectorAll('#scene-batch-keep, #scene-batch-drop')];
+  buttons.forEach((button) => { button.disabled = true; });
+  try {
+    const result = await API.post('/api/semantic/feedback', {
+      query_id: scene.query_id,
+      shot_ids: pending.map((item) => Number(item.shot_id)),
+      action,
+    });
+    if (result.missing) throw new Error('这个词还没有被预置过');
+    pending.forEach((item) => { item.label = action; });
+    pending.forEach((item) => {
+      const card = document.querySelector(`[data-scene-shot="${item.shot_id}"]`);
+      if (!card) return;
+      card.classList.toggle('is-keep', action === 'keep');
+      card.classList.toggle('is-drop', action === 'drop');
+      card.querySelectorAll('[data-scene-label]').forEach((button) => {
+        button.classList.toggle('is-active', button.dataset.sceneLabel === action);
+      });
+    });
+    const counts = result.counts || {};
+    scene.confirmed_keep = Number(counts.keep || 0);
+    scene.confirmed_drop = Number(counts.drop || 0);
+    scene.confirmed = scene.confirmed_keep + scene.confirmed_drop;
+    scene.unconfirmed = Math.max(0, Number(scene.unconfirmed || 0) - pending.length);
+    renderSceneStatus();
+    toast(`本批已标记 ${pending.length} 张为「${action === 'keep' ? '是' : '不是'}」`);
+  } catch (error) {
+    toast(`批量标记失败：${error.message}`, true);
+  } finally {
+    state.sceneBatchBusy = false;
+    buttons.forEach((button) => { button.disabled = false; });
+  }
+}
+
+async function labelSceneShot(shotId, action) {
+  const scene = state.scene;
+  if (!scene || !['keep', 'drop'].includes(action)) return;
+  try {
+    const result = await API.post('/api/semantic/feedback', {
+      query_id: scene.query_id,
+      shot_ids: [shotId],
+      action,
+    });
+    if (result.missing) throw new Error('这个词还没有被预置过');
+    const item = state.sceneItems.find((row) => Number(row.shot_id) === Number(shotId));
+    const firstLabel = item && !item.label;
+    if (item) item.label = action;
+    const card = document.querySelector(`[data-scene-shot="${shotId}"]`);
+    if (card) {
+      card.classList.toggle('is-keep', action === 'keep');
+      card.classList.toggle('is-drop', action === 'drop');
+      card.querySelectorAll('[data-scene-label]').forEach((button) => {
+        button.classList.toggle('is-active', button.dataset.sceneLabel === action);
+      });
+    }
+    const counts = result.counts || {};
+    scene.confirmed_keep = Number(counts.keep || 0);
+    scene.confirmed_drop = Number(counts.drop || 0);
+    scene.confirmed = scene.confirmed_keep + scene.confirmed_drop;
+    if (firstLabel) scene.unconfirmed = Math.max(0, Number(scene.unconfirmed || 0) - 1);
+    renderSceneStatus();
+  } catch (error) {
+    toast(`确认失败：${error.message}`, true);
+  }
+}
+
+async function reloadManage() {
+  const body = $('#sm-body');
+  if (body) body.innerHTML = loadingHtml('正在读取关键词覆盖…');
+  try {
+    const data = await API.get('/api/semantic/manage');
+    state.manage = data;
+    const items = data.items || [];
+    const previous = new Set(state.manageSelected);
+    state.manageSelected = new Set(
+      items.map((item) => Number(item.id)).filter((id) => previous.has(id)),
+    );
+    renderManage();
+    loadManageCoverage();
+  } catch (error) {
+    if (body) body.innerHTML = `<p class="notice">关键词状态读取失败：${escapeHtml(error.message)}</p>`;
+  }
+}
+
+function renderManage() {
+  const data = state.manage;
+  if (!data) return;
+  const cov = data.coverage || {};
+  const items = data.items || [];
+  const missing = Number(cov.missing || 0);
+  const missingPhotos = Number(cov.missing_photo || 0);
+  const missingVideos = Number(cov.missing_video || 0);
+  const canEmbedPhotos = Number(cov.missing_with_preview_photo || 0);
+  const noPreviewPhotos = Number(cov.missing_without_preview_photo || 0);
+  const stale = items.filter((item) => item.stale).length;
+  const missingLabel = missingPhotos > 0
+    ? `还缺 <strong>${missingPhotos.toLocaleString()}</strong> 张照片`
+      + (canEmbedPhotos ? `（可补 ${canEmbedPhotos.toLocaleString()}）` : '（缺 preview）')
+      + (missingVideos ? `；另有 ${missingVideos.toLocaleString()} 个视频` : '')
+    : (missingVideos
+      ? `还缺 <strong>${missingVideos.toLocaleString()}</strong> 个视频（不参与照片搜索）`
+      : `还缺 <strong>${missing.toLocaleString()}</strong> 个资产`);
+  const topHits = Number(data.top_hits || 200);
+  const body = $('#sm-body');
+  if (!body) return;
+  body.innerHTML = `
+    <div class="semantic-coverage">
+      <div>
+        <strong>${Number(cov.embedded || 0).toLocaleString()}</strong>
+        <span>/ ${Number(cov.total_assets || 0).toLocaleString()} 个资产已有画面向量</span>
+      </div>
+      <div class="${missing ? 'is-warn' : ''}">
+        ${missing ? missingLabel : '画面向量覆盖完整'}
+      </div>
+      <div>上次命中 <span class="mono">${escapeHtml(cov.last_hit_at || '—')}</span></div>
+      <div>${stale} 个词可能过期</div>
+    </div>
+    ${missingPhotos > 0
+      ? `<p class="hint tiny">还有 ${missingPhotos.toLocaleString()} 张照片没有画面向量；照片可补 ${canEmbedPhotos.toLocaleString()} 张。补向量是全局动作，所有词共用。</p>`
+      : ''}
+    ${noPreviewPhotos > 0
+      ? `<p class="notice">其中 ${noPreviewPhotos.toLocaleString()} 张照片缺 preview：先到「维护 → 数据维护 → 索引新照片」生成预览，再来补向量。</p>`
+      : ''}
+    ${missingPhotos === 0 && missingVideos > 0
+      ? `<p class="notice">剩下缺向量的 ${missingVideos.toLocaleString()} 个都是视频库资产，不参与照片画面词搜索；如需视频预览，请到「维护」单独处理。</p>`
+      : ''}
+    <div class="semantic-add">
+      <input id="sm-new-word" class="semantic-add-word" type="text" maxlength="40"
+             placeholder="新关键词，如 烟花" aria-label="新关键词">
+      <input id="sm-new-prompt" class="semantic-add-prompt" type="text" maxlength="200"
+             placeholder="实际 prompt（可留空，默认同关键词；英文通常更稳）" aria-label="实际 prompt">
+      <button class="btn small gold" id="sm-add" type="button">添加并计算</button>
+    </div>
+    <p class="hint tiny semantic-cap-note">
+      每个词的结果池最多保留 ${topHits.toLocaleString()} 组候选；表里显示
+      <strong>${topHits.toLocaleString()}+ 组</strong>表示已到上限，不代表全库只有这么多组匹配。
+    </p>
+    <div class="semantic-table-wrap">
+      <table class="semantic-table">
+        <thead><tr>
+          <th><input type="checkbox" id="sm-all" aria-label="全选关键词"></th>
+          <th>关键词</th><th>实际 prompt</th><th>候选池</th><th>上次重算</th>
+          <th>我的表态</th><th>状态</th><th>场景</th>
+        </tr></thead>
+        <tbody>
+          ${items.map((item) => `
+            <tr data-sm-row="${item.id}" class="${state.manageSelected.has(Number(item.id)) ? 'is-picked' : ''}">
+              <td><input type="checkbox" data-sm-id="${item.id}"
+                   ${state.manageSelected.has(Number(item.id)) ? 'checked' : ''}
+                   aria-label="选择 ${escapeHtml(item.query_text)}"></td>
+              <td><strong>${escapeHtml(item.query_text)}</strong></td>
+              <td class="hint tiny">${escapeHtml(item.prompt_text || item.query_text)}
+                <button class="linkish" type="button" data-sm-prompt="${item.id}"
+                        title="改实际送进模型的 prompt；会重算这个词的向量与命中">改</button></td>
+              <td class="mono">${hitCountLabel(item.hit_count, topHits)}${Number(item.hit_count || 0) >= topHits
+                ? ' <span class="semantic-cap">上限</span>' : ''}</td>
+              <td class="hint tiny">${escapeHtml(item.last_hit_at || '—')}</td>
+              <td class="hint tiny">要 ${Number(item.feedback_keep || 0)} · 不要 ${Number(item.feedback_drop || 0)}</td>
+              <td>${item.stale
+                ? '<span class="semantic-chip is-stale">可能过期</span>'
+                : '<span class="semantic-chip">完整</span>'}</td>
+              <td><button class="btn small" type="button" data-sm-scene="${item.id}"
+                    title="进入场景：按识别线挖 60 张，标完沉淀到场景">发现</button></td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+  updateManageSelection();
+  const backfill = $('#sm-backfill');
+  if (backfill) {
+    if (missingPhotos) {
+      backfill.hidden = false;
+      backfill.disabled = canEmbedPhotos === 0;
+      backfill.textContent = canEmbedPhotos
+        ? `补算新照片向量（${canEmbedPhotos.toLocaleString()}）`
+        : '照片缺 preview，暂不能补向量';
+      backfill.title = canEmbedPhotos
+        ? '后台任务，分钟到小时级；需要已安装中文语义搜索组件'
+        : '这些照片没有 preview，先生成预览';
+    } else {
+      backfill.hidden = true;
+      backfill.disabled = true;
+    }
+  }
+}
+
+function renderManageTable() {
+  renderManage();
+}
+
+function toggleManageSelected(id, checked) {
+  if (checked) state.manageSelected.add(id);
+  else state.manageSelected.delete(id);
+  updateManageSelection();
+}
+
+function updateManageSelection() {
+  const count = state.manageSelected.size;
+  const label = $('#sm-selected');
+  if (label) label.textContent = count ? `已选 ${count} 个关键词` : '未选关键词';
+  const refresh = $('#sm-refresh');
+  if (refresh) refresh.disabled = count === 0 || state.manageBusy;
+  const all = $('#sm-all');
+  if (all) {
+    const total = (state.manage?.items || []).length;
+    all.checked = total > 0 && count === total;
+    all.indeterminate = count > 0 && count < total;
+  }
+  document.querySelectorAll('[data-sm-row]').forEach((row) => {
+    row.classList.toggle('is-picked', state.manageSelected.has(Number(row.dataset.smRow)));
+  });
+}
+
+async function refreshSelectedHits() {
+  const ids = [...state.manageSelected];
+  if (!ids.length || state.manageBusy) return;
+  state.manageBusy = true;
+  updateManageSelection();
+  const button = $('#sm-refresh');
+  const old = button ? button.textContent : '';
+  if (button) { button.disabled = true; button.textContent = '重算中…'; }
+  try {
+    const result = await API.post('/api/semantic/refresh', { query_ids: ids });
+    toast(`已重算 ${result.updated} 个词，写入 ${result.hits} 条候选`);
+    const currentId = state.current && Number(state.current.id);
+    await reloadManage();
+    if (currentId && ids.includes(currentId)) await searchBy(state.current.query_text, { quiet: true });
+    else await searchByCurrentIfNeeded();
+  } catch (error) {
+    toast(`重算失败：${error.message}`, true);
+  } finally {
+    state.manageBusy = false;
+    if (button) { button.disabled = false; button.textContent = old || '更新选中命中'; }
+    updateManageSelection();
+  }
+}
+
+function askSemanticText(message, defaultValue) {
+  // Electron 默认不实现 window.prompt，桌面壳暴露了同步桥；浏览器里退回原生 prompt。
+  if (window.photoosDesktop && typeof window.photoosDesktop.promptSync === 'function') {
+    return window.photoosDesktop.promptSync(message, defaultValue);
+  }
+  return window.prompt(message, defaultValue);
+}
+
+async function addSemanticKeyword() {
+  const wordInput = $('#sm-new-word');
+  const promptInput = $('#sm-new-prompt');
+  const word = String(wordInput?.value || '').trim();
+  if (!word) {
+    toast('先填一个关键词', true);
+    wordInput?.focus();
+    return;
+  }
+  const prompt = String(promptInput?.value || '').trim() || word;
+  let action = catalogAction('search_rebuild');
+  if (!action) {
+    try { await loadCatalog(); } catch { /* 下面会提示 */ }
+    action = catalogAction('search_rebuild');
+  }
+  if (!action) { toast('命令目录还没载入，稍后再试', true); return; }
+  if (!action.available) {
+    toast(`缺少依赖：${(action.missing_requires || []).join('、')}`, true);
+    return;
+  }
+  try {
+    const job = await runActionWithProgress(action, $('#sm-progress'), {
+      query: word,
+      prompt,
+      label: `添加「${word}」`,
+    });
+    if (job && job.status === 'COMPLETED') {
+      await reloadManage();
+      await loadManageCoverage();
+      const payload = await API.get('/api/semantic/queries');
+      state.queries = payload.items || [];
+      state.queriesTopHits = Number(payload.top_hits || 200);
+      state.queriesNote = payload.note || '';
+      renderPicker(payload.note);
+      toast(`已添加「${word}」；关闭工作台后可在下拉框里搜它`);
+    }
+  } catch (error) {
+    toast(`添加失败：${error.message}`, true);
+  }
+}
+
+async function editSemanticPrompt(queryId) {
+  const item = (state.manage?.items || []).find((row) => Number(row.id) === Number(queryId));
+  if (!item) return;
+  const next = askSemanticText(
+    `「${item.query_text}」实际送进模型的 prompt（中文标签不变）：`,
+    item.prompt_text || item.query_text,
+  );
+  if (next === null || next === undefined) return;
+  const prompt = String(next).trim();
+  if (!prompt || prompt === String(item.prompt_text || item.query_text)) return;
+  let action = catalogAction('search_rebuild');
+  if (!action) {
+    try { await loadCatalog(); } catch { /* 下面会提示 */ }
+    action = catalogAction('search_rebuild');
+  }
+  if (!action) { toast('命令目录还没载入，稍后再试', true); return; }
+  if (!action.available) {
+    toast(`缺少依赖：${(action.missing_requires || []).join('、')}`, true);
+    return;
+  }
+  if (!window.confirm(
+    `改「${item.query_text}」的 prompt？\n\n`
+    + `新 prompt：${prompt}\n\n`
+    + '会重算这个词的文本向量与命中（需要 AI 环境，通常几秒）。'
+  )) return;
+  try {
+    const job = await runActionWithProgress(action, $('#sm-progress'), {
+      query: item.query_text,
+      prompt,
+      label: `重建「${item.query_text}」`,
+    });
+    if (job && job.status === 'COMPLETED') {
+      await reloadManage();
+      await loadManageCoverage();
+      if (state.current && Number(state.current.id) === Number(queryId)) {
+        await searchBy(state.current.query_text, { quiet: true });
+      }
+    }
+  } catch (error) {
+    toast(`改词义失败：${error.message}`, true);
+  }
+}
+
+async function searchByCurrentIfNeeded() {
+  if (state.current) await searchBy(state.current.query_text, { quiet: true });
+}
+
+async function backfillSemanticVectors() {
+  const cov = state.manage && state.manage.coverage;
+  if (!cov || Number(cov.missing_with_preview_photo || 0) === 0) return;
+  let action = catalogAction('embed_gemma');
+  if (!action) {
+    try { await loadCatalog(); } catch { /* 下面会提示 */ }
+    action = catalogAction('embed_gemma');
+  }
+  if (!action) { toast('命令目录还没载入，稍后再试', true); return; }
+  if (!action.available) {
+    toast(`缺少依赖：${(action.missing_requires || []).join('、')}`, true);
+    return;
+  }
+  const n = Number(cov.missing_with_preview_photo).toLocaleString();
+  if (!window.confirm(
+    `补算 ${n} 张新照片的画面向量？\n\n`
+    + '这是全局后台任务，所有关键词共用；CPU 可能要数小时，CUDA 会快很多。'
+    + '任务可暂停/取消，已写入的向量不会丢。完成后会自动刷新命中。'
+  )) return;
+  const button = $('#sm-backfill');
+  const progress = $('#sm-progress');
+  try {
+    const job = await runActionWithProgress(action, progress, {
+      button, label: `补算新照片向量（${n}）`,
+    });
+    if (!job) return;
+    if (job.status === 'COMPLETED') {
+      const ids = (state.manage.items || []).map((item) => Number(item.id));
+      const result = await API.post('/api/semantic/refresh', { query_ids: ids });
+      toast(`向量补算完成；已刷新 ${result.updated} 个词的命中`);
+      await reloadManage();
+      await loadManageCoverage();
+      await searchByCurrentIfNeeded();
+    } else {
+      toast(`补算任务未完成：${job.status}`, true);
+    }
+  } catch (error) {
+    toast(`补算失败：${error.message}`, true);
+  }
+}
+
+function hitCountLabel(count, topHits) {
+  const n = Number(count || 0);
+  const cap = Number(topHits || 200);
+  return n >= cap ? `${n}+ 组` : `${n} 组`;
+}
+
 function renderPicker(note) {
   const pick = $('#search-pick');
+  const topHits = Number(state.queriesTopHits || 200);
   const options = state.queries
     .map((q) => `<option value="${escapeHtml(q.query_text)}">${escapeHtml(q.query_text)}`
-      + `（${q.hit_count} 组）</option>`)
+      + `（${hitCountLabel(q.hit_count, topHits)}候选）</option>`)
     .join('');
-  pick.innerHTML = `<option value="">— 选一个要找的东西（括号里是能找到的拍摄组数）—</option>`
+  pick.innerHTML = `<option value="">— 选择一个预置搜索词（括号内为候选组数）—</option>`
     + options;
   const total = $('#search-total');
-  total.textContent = note || `库里已准备好 ${state.queries.length} 个可搜的词`;
+  total.textContent = note || `可用搜索词 ${state.queries.length} 个`;
 }
 
 /**
@@ -452,51 +1215,70 @@ function renderNotReady(payload) {
 }
 
 /**
- * 「你的修改」面板：显示学到的内容、提供开关与"存成主题"。
+ * 「你的判断」面板：显示表态统计、提供开关与"存成主题"。
  *
  * ⚠️ 措辞纪律：这里显示的是**用户的表态统计**，不是模型给照片打的分。
- * 所以写"你选了几张 / 删了几张"，绝不写"模型置信度 / 准确率 / 评分"。
+ * 所以写"我要这种 / 不是这种"，绝不写"模型置信度 / 准确率 / 评分"。
  */
 function renderLearning() {
   const node = $('#search-learning');
   const counts = state.counts || { keep: 0, drop: 0 };
   const total = (counts.keep || 0) + (counts.drop || 0);
   const notes = (state.tuning && state.tuning.notes) || [];
+  const visible = state.onlyConfirmed
+    ? state.items.filter((item) => state.feedback[String(item.shot_id)] === 'keep')
+    : state.items;
 
   const mode = total ? 'clean' : 'raw';
   node.innerHTML = `
-    <div class="learn-bar">
+    <div class="learn-bar${state.onlyConfirmed ? ' is-confirmed-only' : ''}">
       <div class="learn-info">
-        <span class="learn-title">你改过的</span>
-        <span class="learn-count">选入 <b>${counts.keep || 0}</b> · 删掉 <b>${counts.drop || 0}</b></span>
+        <span class="learn-title">你的判断</span>
+        <span class="learn-count">我要这种 <b>${counts.keep || 0}</b> · 不是这种 <b>${counts.drop || 0}</b></span>
         ${state.tuned
           ? `<span class="learn-badge">已按你的修改重排</span>`
           : (total < 2
-            ? '<span class="hint tiny">改两张以上才会重排</span>'
+            ? '<span class="hint tiny">标两张以上才会重排</span>'
             : '<span class="hint tiny">重排未生效</span>')}
       </div>
       <div class="learn-actions">
-        <label class="check inline">
-          <input type="checkbox" id="search-tune-toggle" ${state.showTuning ? 'checked' : ''}>
-          <span>按我的修改重排</span>
+        <label class="check inline search-confirmed-filter">
+          <input type="checkbox" id="search-only-confirmed" ${state.onlyConfirmed ? 'checked' : ''}>
+          <span>只看我确认过的（<b>${visible.length}</b>）</span>
         </label>
-        <button class="btn small gold" id="search-keep-all"
-                title="把这一页显示的 ${state.items.length} 组一次全标成「我要这种」（一次请求，不逐张点）"
-                ${state.items.length ? '' : 'disabled'}>
-          本页 ${state.items.length} 组全部要了</button>
-        <button class="btn small" id="search-drop-all"
-                title="把这一页 ${state.items.length} 组一次全标成「不是这种」（一次请求）"
-                ${state.items.length ? '' : 'disabled'}>
-          本页 ${state.items.length} 组全部否决</button>
+        <span class="confirmed-only-actions">
+          <label class="check inline">
+            <input type="checkbox" id="search-tune-toggle" ${state.showTuning ? 'checked' : ''}>
+            <span>按我的修改重排</span>
+          </label>
+          <button class="btn small gold" id="search-keep-all"
+                  title="把本页 ${visible.length} 组一次标成「我要这种」（只发一次请求）"
+                  ${visible.length ? '' : 'disabled'}>
+            全部「我要这种」</button>
+          <button class="btn small" id="search-drop-all"
+                  title="把本页 ${visible.length} 组一次标成「不是这种」（只发一次请求）"
+                  ${visible.length ? '' : 'disabled'}>
+            全部「不是这种」</button>
+        </span>
         <button class="btn small" id="search-save-theme">结果存成主题</button>
         <button class="btn small ghost" id="search-drop-query"
-                title="把这个词从库里删掉；下拉框里不再出现，模型原始结果也会一起清掉">
-          删除词条</button>
+                title="删除这个搜索词；下拉框里不再出现，已算好的结果也会一起清掉">
+          删除这个词</button>
         ${total ? '<button class="btn small" id="search-clear-feedback">清空修改</button>' : ''}
       </div>
     </div>
     ${notes.length ? `<p class="hint tiny">${notes.map(escapeHtml).join(' ')}</p>` : ''}`;
 
+  const onlyConfirmed = $('#search-only-confirmed');
+  if (onlyConfirmed) {
+    onlyConfirmed.onchange = () => {
+      state.onlyConfirmed = onlyConfirmed.checked;
+      state.selected.clear();
+      state.anchor = null;
+      renderLearning();
+      renderResults();
+    };
+  }
   const toggle = $('#search-tune-toggle');
   if (toggle) {
     toggle.onchange = () => {
@@ -527,7 +1309,7 @@ function renderLearning() {
     dropQuery.onclick = async () => {
       const text = state.current ? state.current.query_text : '';
       if (!text) return;
-      const ok = confirm(`删除词条「${text}」？\n\n它会从下拉框消失，相关的命中与我的表态一并清掉；\n需要时可以重新"准备"这个词。`);
+      const ok = confirm(`删除搜索词「${text}」？\n\n它会从下拉框消失，相关的命中与我的表态一并清掉；\n需要时可以重新准备这个词。`);
       if (!ok) return;
       try {
         await API.del(`/api/semantic/feedback?query=${encodeURIComponent(text)}&drop=true`);
@@ -852,7 +1634,9 @@ function renderPickBar() {
 /** 结果头 + 网格。**只认领节点，不重建**（见文件头"为什么不能重建整页"）。 */
 function renderResults() {
   const q = state.current;
-  const items = state.items;
+  const items = state.onlyConfirmed
+    ? state.items.filter((item) => state.feedback[String(item.shot_id)] === 'keep')
+    : state.items;
   const head = $('#search-summary');
   const grid = $('#search-results');
 
@@ -873,14 +1657,18 @@ function renderResults() {
         <span class="hint tiny">
           ${q.prompt_text && q.prompt_text !== q.query_text
             ? `（实际用的查询词：${escapeHtml(q.prompt_text)}）· ` : ''}
-          找到 <strong>${items.length}</strong> 个拍摄组
+          ${state.onlyConfirmed
+            ? `展示 <strong>${items.length}</strong> 张我确认过的`
+            : `取出 <strong>${items.length}</strong> 个候选拍摄组`}
         </span>
       </div>
       <div class="hint tiny">这不是「最佳照片」—— 请用拍摄时刻判断</div>
     </div>`;
 
   if (!items.length) {
-    grid.innerHTML = '<p class="hint">没有找到任何拍摄组。</p>';
+    grid.innerHTML = state.onlyConfirmed
+      ? '<p class="hint">这个词还没有你确认过的照片。取消「只看我确认过的」可以查看全部候选，或到关键词工作台的「发现」里继续筛选。</p>'
+      : '<p class="hint">没有找到任何拍摄组。</p>';
     renderPickBar();
     renderContentQueryBar();
     return;
@@ -921,7 +1709,6 @@ function buildCard(item) {
       <button class="sc-pick" type="button" aria-pressed="false">
         <span class="sc-tick" aria-hidden="true"></span>
       </button>
-      <span class="sc-mark" hidden></span>
     </div>
     <figcaption>
       <div class="search-when"><span class="sc-when"></span>
@@ -929,6 +1716,7 @@ function buildCard(item) {
       <div class="search-meta">
         ${badgeHtml()}
         <span class="hint tiny sc-count" hidden></span>
+        <span class="sc-mark" hidden></span>
       </div>
       <div class="sc-actions">
         <button class="btn small" data-fb="keep" title="我要这种：以后多找类似的">我要这种</button>
@@ -998,15 +1786,17 @@ function updateCard(node, item) {
   node.classList.toggle('is-drop', mark === 'drop');
   const markNode = node.querySelector('.sc-mark');
   markNode.hidden = !mark;
-  markNode.textContent = mark === 'keep' ? '已选入' : '已删掉';
+  markNode.textContent = mark === 'keep' ? '我要这种' : '不是这种';
 
   node.querySelector('[data-fb="keep"]').classList.toggle('gold', mark === 'keep');
   node.querySelector('[data-fb="drop"]').classList.toggle('danger', mark === 'drop');
 
-  node.querySelector('.search-rank').textContent = `#${item.rank} · 相似度 `
-    + `${item.score.toFixed(3)}`
-    + (item.base_score !== undefined && item.base_score !== null
-      ? `（原始 ${Number(item.base_score).toFixed(3)}）` : '');
+  const rank = node.querySelector('.search-rank');
+  rank.textContent = `#${item.rank} · 相似度 ${item.score.toFixed(3)}`;
+  // 原始相似度只放在悬停说明里：它是核对用的内部数字，不是给人比较优劣的第二把尺。
+  rank.title = item.base_score !== undefined && item.base_score !== null
+    ? `这只用于解释排序：重排前相似度 ${Number(item.base_score).toFixed(3)}`
+    : '用于解释排序，不代表照片好坏';
 }
 
 // --------------------------------------------------------------------- 条件条
@@ -1072,10 +1862,13 @@ function renderContentQueryBar() {
       const chips = [{ key: 'query', label: `搜索词：${q.query_text}` }];
       // 重排不是"筛掉什么"，但它明显改变你看到的东西 —— 非默认时如实说出来。
       if (state.showTuning) chips.push({ key: 'tune', label: '已按你的修改重排', tone: 'meta' });
+      if (state.onlyConfirmed) chips.push({ key: 'confirmed', label: '只看我确认过的', tone: 'meta' });
       return chips;
     },
-    total: state.items.length,
-    totalLabel: '找到',
+    total: state.onlyConfirmed
+      ? state.items.filter((item) => state.feedback[String(item.shot_id)] === 'keep').length
+      : state.items.length,
+    totalLabel: state.onlyConfirmed ? '已确认' : '找到',
     clearLabel: '清空搜索',
     onClearAll: () => {
       state.current = null;

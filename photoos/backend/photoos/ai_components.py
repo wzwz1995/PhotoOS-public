@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -78,7 +79,14 @@ COMPONENTS: tuple[Component, ...] = (
         module="onnxruntime", package="onnxruntime-gpu==1.31.0",
         unlocks="同上，但走 NVIDIA GPU（更快）",
         requires=("clip-model",),
-        note="含 CUDA 12 运行时（约 3 GB）；会替换 CPU 版，失败自动回退",
+        note="只服务 CLIP / 人脸等 ONNX 模型；不含 EmbeddingGemma",
+    ),
+    Component(
+        id="torch-cuda", label="EmbeddingGemma CUDA 加速（torch）", kind="venv", size_mb=2100,
+        unlocks="中文画面词的图像向量走 NVIDIA GPU；GPU 实测约 234 ms/张",
+        requires=("gemma-text",),
+        note="装在独立 AI 环境；只加速 EmbeddingGemma，不是 ONNX Runtime GPU。"
+             "安装后建议先试算 50 张，确认显存与速度。",
     ),
 )
 
@@ -158,6 +166,22 @@ def _model_ready(component_id: str, data_root: Path) -> bool:
 
             python = ai_venv_dir() / "Scripts" / "python.exe"
             return python.is_file() and model_store.is_gemma_ready(data_root)
+        except Exception:  # noqa: BLE001
+            return False
+    if component_id == "torch-cuda":
+        try:
+            from .ai_install import ai_venv_dir
+
+            python = ai_venv_dir() / "Scripts" / "python.exe"
+            if not python.is_file():
+                return False
+            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+            probe = subprocess.run(
+                [str(python), "-c",
+                 "import torch; raise SystemExit(0 if torch.cuda.is_available() else 1)"],
+                capture_output=True, timeout=30, creationflags=flags,
+            )
+            return probe.returncode == 0
         except Exception:  # noqa: BLE001
             return False
     if component_id == "face-models":

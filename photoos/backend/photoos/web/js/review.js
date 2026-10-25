@@ -207,7 +207,7 @@ function sceneLabel(scene) {
     ? Number(scene.needs_review)
     : Math.max(0, Number(scene.shots || 0) - Number(scene.reviewed || 0));
   const tail = unreviewed === 0 ? '✅ 已审完' : `未审 ${unreviewed}`;
-  return `${sceneWhen(scene)} — ${scene.shots} Shot，${tail}，最终 ${scene.finals || 0}`;
+  return `${sceneWhen(scene)} — 共 ${scene.shots} 组，${tail}，最终 ${scene.finals || 0}`;
 }
 
 /** 库里出现过的地点（按时段里的 Scene 数排序）。 */
@@ -252,7 +252,11 @@ function reviewEmptyHtml() {
   const total = state.scenes.length;
   const nothing = filtered === 0;
   const narrowed = filtered < total;
-  const title = nothing ? '没有匹配的场景' : '选择一个场景';
+  // 场景下拉只在缩小范围之后才出现；还没缩小时不要说“选择一个场景”，
+  // 否则用户会去找一个此刻不存在的控件。
+  const title = nothing
+    ? '没有匹配的场景'
+    : (narrowed ? '选择一个场景' : '先缩小范围，再选场景');
   const count = state.sessionId
     ? `本时段 ${total}${narrowed ? ` · 筛出 ${filtered}` : ''}`
     : `场景 ${total}${narrowed ? ` · 筛出 ${filtered}` : ''}`;
@@ -368,7 +372,7 @@ function renderPicker() {
   const sessions = state.sessions.map((session) => `
     <option value="${session.id}" ${session.id === state.sessionId ? 'selected' : ''}
       title="${escapeHtml(session.name)}">
-      ${escapeHtml(sessionLabel(session))}（${session.shots} Shot / ${session.scenes} Scene）
+      ${escapeHtml(sessionLabel(session))}（${session.shots} 组 / ${session.scenes} 个场景）
     </option>`).join('');
   const cities = uniqueCities().map(([city, count]) => `
     <option value="${escapeHtml(city)}" ${city === state.filter.city ? 'selected' : ''}>
@@ -788,7 +792,7 @@ function renderReviewQueryBar() {
     compute: () => chips,
     // 只在**真的在筛**的时候报数：没筛时 "显示 30 / 30 个 Scene" 是噪音。
     // 用 `totalText` 而不是 `total` —— 这里筛的是 Scene，不是"张"。
-    totalText: chips.length ? `显示 ${visibleScenes().length} / ${total} 个 Scene` : '',
+    totalText: chips.length ? `显示 ${visibleScenes().length} / ${total} 个场景` : '',
     clearLabel: '清除筛选',
     onClearAll: chips.length ? clearFilter : null,
   });
@@ -854,7 +858,7 @@ async function resetGapOverride() {
 function openAddToCollection() {
   const shot = state.shots[state.index];
   if (!shot) {
-    toast('先选一个 Shot', true);
+    toast('先选一个拍摄组', true);
     return;
   }
   openPickModal({
@@ -900,7 +904,7 @@ function renderStatus() {
     const canRegroup = !!(regroupAction && regroupAction.available);
     node.innerHTML = allEmpty
       ? '<div class="wb-empty"><span class="fleuron">❦</span>'
-        + '<p>照片已索引，但<b>还没有分好组</b>（上面每个时段都显示 0 Shot / 0 Scene）。</p>'
+        + '<p>照片已索引，但<b>还没有分好组</b>（上面每个时段都显示 0 组 / 0 个场景）。</p>'
         + '<p>分组要按「时段 → 拍摄组 → 场景」三层顺序算一遍，点下面这个按钮交给后台；'
         + '它只改数据库里的分组关系，<b>不移动、不复制、不删除任何照片</b>。</p>'
         + `<div class="not-ready-actions">
@@ -964,7 +968,7 @@ function renderStatus() {
     <div class="review-summary">
       <div class="kpi-title-wrap">
         <span class="kpi-city">${escapeHtml(city)}</span>
-        <span class="kpi-when">${escapeHtml(when)} · ${total} Shot（相似组 ${
+        <span class="kpi-when">${escapeHtml(when)} · ${total} 个拍摄组（相似组 ${
           currentGroups().length} 个）</span>
       </div>
       <div class="kpi-progress">
@@ -1006,7 +1010,7 @@ function renderViewer() {
     // 免得这里和状态区各写一句、两句还不一样）；选了场景但空 → 说明这一场确实没有。
     node.innerHTML = state.sceneId
       ? '<div class="wb-empty"><span class="fleuron">❦</span>'
-        + '<p>这个 Scene 里没有可处理的 Shot。</p></div>'
+        + '<p>这个场景里没有可处理的拍摄组。</p></div>'
       : reviewEmptyHtml();
     return;
   }
@@ -1068,7 +1072,7 @@ function renderViewer() {
       <span class="viewer-name">${escapeHtml(baseName(shot.primary_path || ''))}</span>
       <span class="sel-badge ${selectionClass(shot.selection_status)}">
         ${escapeHtml(selectionLabel(shot.selection_status, state.labels))}</span>
-      <span class="muted">第 ${state.index + 1}/${state.shots.length} 个 Shot
+      <span class="muted">第 ${state.index + 1}/${state.shots.length} 个拍摄组
         · 本相似组 ${position}/${group.length}</span>
       <span class="spacer"></span>
       <button class="btn small" id="viewer-compare">比较本组 <kbd>C</kbd></button>
@@ -1391,7 +1395,7 @@ function nextUnreviewed() {
   } else {
     const wrap = state.shots.findIndex((shot) => shot.selection_status === 'UNREVIEWED');
     if (wrap < 0) {
-      toast('这个 Scene 已经全部审过了');
+      toast('这个场景已经全部审过了');
       return;
     }
     state.index = wrap;
@@ -1708,7 +1712,7 @@ function stepThreshold(direction) {
 function persistGap(value) {
   if (!state.sessionId) {
     // 到这一步说明连 Scene 都没选，没有可归属的时段 —— 明说，不要静默丢弃
-    toast('还没选时段/Scene，阈值只在本页生效，没能保存到某个时段', true);
+    toast('还没选时段或场景，阈值只在本页生效，没能保存到某个时段', true);
     return;
   }
   API.patch(`/api/sessions/${state.sessionId}/review-config`, { shot_gap_seconds: value })

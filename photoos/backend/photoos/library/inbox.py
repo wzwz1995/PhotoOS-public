@@ -12,7 +12,9 @@ MTP 全量逐对象读取在这台机器上会把设备栈读挂：`DCIM\\Camera
 
 ## 三条纪律
 
-1. **收件箱里的文件只读**：导入是复制；不移动、不改名、不删除。
+1. **收件箱默认只读**：导入是复制；不移动、不改名、不删除。
+   唯一例外是用户在收件箱卡片里显式勾选「导入后清理已入库文件」——只删
+   台账可核对、目标仍在库里的副本；失败/目标缺失/文件已变化的都保留。
 2. **复制中的文件不导入**：同一个 `(大小, mtime)` 必须**持续** `inbox_settle_seconds`
    秒（从第一次观察到它开始计时）。反复扫描**不会**重置计时 —— 否则用户
    "扫描 → 看到可导入 → 立刻点导入"时，导入内部那一扫会把时钟归零，又变回复制中。
@@ -430,6 +432,34 @@ def record_import(
         }
         recorded += 1
 
+    # 计划阶段因"目标已有同内容"而剔除的源文件（`plan.duplicates`）不在
+    # `plan.plan.files` 里；旧实现只遍历 files，于是这 165 个源永远记不进台账，
+    # 每次扫描都显示"可导入"，重复导入又继续跳过。这里按 duplicates 的既有目标
+    # 补记，目标仍在校验一遍。
+    for key, existing_relative in list(getattr(plan, "duplicates", []) or []):
+        entry = by_key.get(key)
+        if entry is None:
+            continue
+        root = plan.target_root.get(key)
+        if root is None:
+            continue
+        target = Path(root) / Path(str(existing_relative).replace("\\", "/"))
+        if not target.is_file():
+            continue
+        try:
+            stat = entry.path.stat()
+            size, mtime_ns = int(stat.st_size), int(stat.st_mtime_ns)
+        except OSError:
+            size, mtime_ns = int(entry.size), -1
+        entries[key] = {
+            "size": size,
+            "mtime_ns": mtime_ns,
+            "target": existing_relative,
+            "library_id": plan.library_of.get(key),
+            "imported_at": stamp,
+        }
+        recorded += 1
+
     if recorded:
         if len(entries) > LEDGER_LIMIT:
             newest = sorted(
@@ -441,6 +471,118 @@ def record_import(
     return recorded
 
 
+@dataclass
+class InboxCleanupResult:
+    """清理已入库的收件箱副本的结果。"""
+
+    deleted: int = 0
+    bytes: int = 0
+    kept: int = 0
+    errors: list[str] = field(default_factory=list)
+
+    @property
+    def summary(self) -> str:
+        text = f"已清理 {self.deleted} 个文件（{self.bytes / 1e6:.1f} MB）"
+        if self.kept:
+            text += f"；保留 {self.kept} 个（目标不存在或文件已变化）"
+        if self.errors:
+            text += f"；{len(self.errors)} 个删除失败"
+        return text
+
+
+def cleanup_imported(
+    settings: Settings,
+    *,
+    library_roots: Mapping[int, Path],
+) -> InboxCleanupResult:
+    """删除收件箱里**已经安全入库**的副本。
+
+    这是收件箱"只读"承诺的唯一例外，必须同时满足：
+
+    * 文件在收件箱根内，且不是符号链接；
+    * 台账里有它（说明之前已经导入成功）；
+    * 当前大小/mtime 仍与台账一致（没有被重新复制/改写）；
+    * 它所在的照片库根可解析，目标文件仍存在且大小一致。
+
+    任何一条不满足都保留文件。只删收件箱副本，手机与照片库里的文件不动。
+    台账里被删掉的条目也一并清掉，免留下"文件已不在，却仍记为已导入"的幽灵。
+    """
+    inbox_root = Path(settings.effective_inbox_path)
+    try:
+        root = inbox_root.resolve()
+    except OSError:
+        return InboxCleanupResult()
+    ledger_file = _ledger_path(settings)
+    raw = _read_json(ledger_file)
+    entries = raw.get("entries")
+    if not isinstance(entries, dict) or not entries:
+        return InboxCleanupResult()
+
+    roots: dict[int, Path] = {}
+    for library_id, path in (library_roots or {}).items():
+        if path is None:
+            continue
+        try:
+            roots[int(library_id)] = Path(path).resolve()
+        except (OSError, TypeError, ValueError):
+            continue
+
+    result = InboxCleanupResult()
+    deleted_keys: list[str] = []
+    removed_dirs: set[Path] = set()
+    for key, entry in list(entries.items()):
+        if not isinstance(entry, dict):
+            continue
+        try:
+            source = (root / str(key)).resolve()
+            if not source.is_relative_to(root) or source == root:
+                result.errors.append(f"{key}: 不在收件箱内")
+                continue
+            if not source.is_file() or source.is_symlink():
+                continue
+            stat = source.stat()
+            if int(entry.get("size") or -1) != int(stat.st_size):
+                result.kept += 1
+                continue
+            if int(entry.get("mtime_ns") or -1) != int(stat.st_mtime_ns):
+                result.kept += 1
+                continue
+            library_id = int(entry.get("library_id") or 0)
+            target_root = roots.get(library_id)
+            if target_root is None:
+                result.kept += 1
+                continue
+            target = (target_root / str(entry.get("target") or "")).resolve()
+            if not target.is_relative_to(target_root) or not target.is_file():
+                result.kept += 1
+                continue
+            if target == source or target.stat().st_size != stat.st_size:
+                result.kept += 1
+                continue
+            source.unlink()
+        except OSError as exc:
+            result.errors.append(f"{key}: {exc}")
+            continue
+        result.deleted += 1
+        result.bytes += int(stat.st_size)
+        deleted_keys.append(str(key))
+        removed_dirs.add(source.parent)
+
+    if deleted_keys:
+        for key in deleted_keys:
+            entries.pop(key, None)
+        _write_json(ledger_file, {"version": 1, "entries": entries})
+        # 只收走空目录；有别的文件（例如还没导入的）就保留整条路径。
+        for directory in sorted(removed_dirs, key=lambda item: len(item.parts), reverse=True):
+            while directory != root and directory.is_relative_to(root):
+                try:
+                    directory.rmdir()
+                except OSError:
+                    break
+                directory = directory.parent
+    return result
+
+
 def ensure_inbox_dir(settings: Settings) -> Path:
     """确保收件箱存在（只在用户点「打开收件箱」时创建，不在启动时偷偷建）。"""
     root = Path(settings.effective_inbox_path)
@@ -449,8 +591,10 @@ def ensure_inbox_dir(settings: Settings) -> Path:
 
 
 __all__ = [
+    "InboxCleanupResult",
     "InboxFile",
     "InboxSnapshot",
+    "cleanup_imported",
     "ensure_inbox_dir",
     "filter_plan",
     "ready_map",

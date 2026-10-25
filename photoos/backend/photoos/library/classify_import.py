@@ -515,6 +515,22 @@ def build_plan(
             target_root[classified.key] = photo_root
             library_of[classified.key] = int(photo_library_id)
 
+    # 计划阶段因同内容被剔除的源（`duplicates`）不在 `plan.files` 里；它们仍然
+    # 需要一个可核对的 target_root/library_of，否则收件箱台账无法记录这些"已安全
+    # 在库里"的源文件，扫描会永远把它们显示成可导入。
+    for key, _existing_relative in duplicates:
+        entry = by_key.get(key)
+        if entry is None:
+            continue
+        if entry.item.kind == "video":
+            if video_root is None:
+                continue
+            target_root[key] = video_root
+            library_of[key] = int(video_library_id)  # type: ignore[arg-type]
+        else:
+            target_root[key] = photo_root
+            library_of[key] = int(photo_library_id)
+
     if missing_video_library:
         raise PhotoOSError(
             f"源中含 {missing_video_library} 个视频，但没有指定视频库。"
@@ -602,6 +618,10 @@ def execute_plan(
     report = ClassifyImportReport()
     report.skipped_duplicate = len(plan.duplicates)
     by_key = {entry.item.key: entry for entry in plan.entries}
+    for key, _existing_relative in plan.duplicates:
+        entry = by_key.get(key)
+        if entry is not None:
+            report.sources_skipped.append(str(entry.path))
     #: library_id → [(relative, digest, SourceEntry)]
     per_library: dict[int, list[tuple[str, str, SourceEntry]]] = {}
 

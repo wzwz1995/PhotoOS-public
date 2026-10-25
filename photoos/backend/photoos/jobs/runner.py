@@ -56,6 +56,36 @@ def _interpreter_for_subprocess(settings: Settings) -> tuple[str, str]:
     return _catalog.interpreter(settings)
 
 
+def _format_bytes(value: float) -> str:
+    """给任务说明用的人类可读大小；不引入第三方依赖。"""
+    size = float(value or 0)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if size < 1024 or unit == "TB":
+            return f"{size:.1f} {unit}" if unit != "B" else f"{int(size)} B"
+        size /= 1024
+    return f"{size:.1f} TB"
+
+
+def _tree_stats(root: Path) -> tuple[int, int]:
+    """统计一个正在写入的目录里当前已有多少文件、多少字节。
+
+    只用于 ADB 拉取的进度反馈；个别文件在统计瞬间消失（发布/清理）时跳过即可。
+    """
+    count = 0
+    size = 0
+    try:
+        for base, _dirs, names in os.walk(root):
+            for name in names:
+                try:
+                    count += 1
+                    size += (Path(base) / name).stat().st_size
+                except OSError:
+                    continue
+    except OSError:
+        return count, size
+    return count, size
+
+
 def _terminate(proc: "Any", *, grace: float = 5.0) -> None:
     """先礼后兵地结束一个子进程：terminate → 等 → kill。
 
@@ -233,10 +263,15 @@ class JobRunner:
         return Path(library.root_path_hint)
 
     def _make_progress(self, job_id: int, on_progress):
+        # ADB 的进度采样线程与主执行线程都会写进度；串行化，避免同一任务
+        # 的两次 update_progress 交错成“done 倒退 / note 对不上”的中间态。
+        lock = threading.Lock()
+
         def progress(done: int, total: int, note: str) -> None:
-            self.queue.update_progress(job_id, done=done, total=total, note=note)
-            if on_progress is not None:
-                on_progress(done, total, note)
+            with lock:
+                self.queue.update_progress(job_id, done=done, total=total, note=note)
+                if on_progress is not None:
+                    on_progress(done, total, note)
 
         return progress
 
@@ -613,7 +648,7 @@ class JobRunner:
             report.stages["收件箱"] = (
                 f"已复制完成 {plan.total} 个文件（其余仍在复制或已导入，本次不处理）"
             )
-            if plan.total == 0:
+            if plan.total == 0 and not plan.duplicates:
                 report.stages["收件箱"] = "没有可导入的稳定文件：等复制完成后再点「立即导入」"
                 return
         report.stages["计划"] = (
@@ -638,7 +673,19 @@ class JobRunner:
         if inbox_ready:
             # 只记**真的落库**的那部分；失败的留给下一次扫描重试（台账绝不能把失败记成成功）。
             recorded = inbox_mod.record_import(self.settings, plan, result)
-            report.stages["收件箱台账"] = f"已登记 {recorded} 个文件（收件箱源文件保留）"
+            cleanup = bool(scope.get("cleanup_after_import"))
+            report.stages["收件箱台账"] = (
+                f"已登记 {recorded} 个文件"
+                + ("；将清理已入库副本" if cleanup else "（收件箱源文件保留）")
+            )
+            if cleanup and not stop():
+                roots = {
+                    library.id: library.root_path
+                    for library in self.store.list_all()
+                    if library.root_path is not None
+                }
+                cleaned = inbox_mod.cleanup_imported(self.settings, library_roots=roots)
+                report.stages["收件箱清理"] = cleaned.summary
         if result.errors:
             report.stages["错误样例"] = "; ".join(result.errors[:3])
         if stop():
@@ -701,20 +748,77 @@ class JobRunner:
             )
         progress = self._make_progress(job.id, on_progress)
         stop = lambda: self.queue.should_stop(job.id)  # noqa: E731
+        since = scope.get("since") or None
 
         report.stages["设备"] = serial
+        # 先枚举一次手机目录，拿到总字节数。`adb pull` 在 Windows 上不一定会
+        # 输出百分比（实测 6,648 个文件的整目录拉取一直是 0/0），没有总数就
+        # 没有进度条，也无法让任务心跳保鲜。枚举本身只读，6,648 个文件约 3 秒。
+        progress(0, 0, "正在读取手机目录…")
+        try:
+            listing = client.list_dir(serial, remote)
+        except PhotoOSError as exc:
+            # 列表失败不阻断真正的 pull：pull 可能仍然能完成；此时退回 adb 输出。
+            listing = None
+            report.stages["手机目录"] = f"读取失败（继续拉取）：{exc.message[:120]}"
+        total_files = 0
+        total_bytes = 0
+        if listing is not None:
+            candidates = [item for item in listing if not item.is_dir]
+            if since:
+                candidates = [item for item in candidates if item.date and item.date >= since]
+            total_files = len(candidates)
+            total_bytes = sum(int(item.size) for item in candidates)
+            report.stages["手机目录"] = (
+                f"{total_files} 个文件 / {_format_bytes(total_bytes)}"
+            )
+            if since and total_files == 0:
+                adb_mod.discard(staging)
+                raise PhotoOSError(f"手机上 {since} 之后没有文件")
+            if total_bytes:
+                progress(0, total_bytes, f"准备拉取 {total_files} 个文件（{_format_bytes(total_bytes)}）…")
+
+        # `adb pull` 是阻塞的外部进程；用独立线程按本地暂存目录的实际增长更新进度。
+        # 这比解析 adb 的终端输出可靠得多，也让 6,648 个文件的大拉取有持续心跳，
+        # 不会被孤儿回收误判为“进程中断”。
+        watched = threading.Event()
+        watcher: threading.Thread | None = None
+        if total_bytes:
+            def watch() -> None:
+                last = -1
+                while not watched.wait(0.8):
+                    count, size = _tree_stats(staging)
+                    size = min(size, total_bytes)
+                    if size == last:
+                        continue
+                    last = size
+                    progress(
+                        size, total_bytes,
+                        f"已接收 {_format_bytes(size)} / {_format_bytes(total_bytes)}"
+                        f"（{count} 个文件）",
+                    )
+
+            watcher = threading.Thread(target=watch, name="photoos-adb-progress", daemon=True)
+            watcher.start()
+
         try:
             result = client.pull(
                 serial,
                 remote,
                 staging,
-                since=scope.get("since") or None,
-                on_progress=progress,
+                since=since,
+                # 有总字节数时由上面的采样线程统一报进度；否则保留 adb 百分比兜底。
+                on_progress=None if total_bytes else progress,
                 stop=stop,
             )
         except PhotoOSError:
             adb_mod.discard(staging)
             raise
+        finally:
+            watched.set()
+            if watcher is not None:
+                watcher.join(timeout=2.0)
+
         if result.cancelled or stop():
             adb_mod.discard(staging)
             report.stages["拉取"] = "已取消：暂存区已清理，手机上的文件没有被动过"
@@ -722,6 +826,12 @@ class JobRunner:
         if not result.ok:
             adb_mod.discard(staging)
             raise PhotoOSError("adb pull 失败：" + ("；".join(result.errors) or "未知原因"))
+
+        if total_bytes:
+            progress(
+                min(int(result.bytes or 0), total_bytes), total_bytes,
+                f"拉取完成：{_format_bytes(result.bytes)} / {_format_bytes(total_bytes)}",
+            )
 
         try:
             target = adb_mod.publish(

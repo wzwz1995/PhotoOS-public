@@ -226,6 +226,24 @@ def test_gap_in_sequence_lowers_confidence() -> None:
     assert any("序号" in n for n in g.notes)
 
 
+def test_non_numeric_filename_does_not_crash_assessment() -> None:
+    """没有数字的文件名（手机中文名 / DOCUMENT_PICTURE）不能把 regroup 整批打崩。
+
+    2026-10-21 真机导入 6,586 张手机照片后，`shots regroup --apply` 在 `_assess()`
+    解包 `None` 时 `TypeError`，6,586 个 Asset 全部没有 shot_id。这里锁住回归。
+    """
+    items = [
+        _asset(1, "DOCUMENT_PICTURE.jpg", "2026-01-01 10:00:00.00",
+               lens_model="A", focal_length=50.0),
+        _asset(2, "中文照片.jpg", "2026-01-01 10:00:00.50",
+               lens_model="A", focal_length=50.0),
+    ]
+    g = sg.group_shots(items, gap_seconds=2.0)[0]
+    assert g.size == 2
+    assert g.confidence == sg.CONFIDENCE_LIKELY
+    assert any("序号" in n for n in g.notes)
+
+
 def test_dup_suffix_does_not_break_sequence() -> None:
     """`__N` 撞名后缀必须先剥掉再比序号（PHASE1_TECH_PLAN §B3：命名冲突 ≠ 重复）。"""
     assert sg._sequence_number("DSC_9005__2.JPG") == ("dsc_", 9005)

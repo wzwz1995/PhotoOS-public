@@ -151,6 +151,10 @@ def test_cleanup_refuses_paths_outside_library(env: TestClient, monkeypatch) -> 
 
 
 def test_cleanup_job_recycles_via_injected_function(env: TestClient, monkeypatch) -> None:
+    # TestClient 的 lifespan 会启动 BackgroundRunner；全量套件变慢时它可能先领走
+    # 这条任务，导致手工 claim_next() 返回 None（单独跑时又恰好手工先领）。
+    # 本测试要自己控制 claim/run，所以先停掉后台线程。
+    env.app.state.runner.stop()  # type: ignore[attr-defined]
     a = env.assets["a.JPG"]  # type: ignore[attr-defined]
     rejects_mod.mark(env.db, a)  # type: ignore[attr-defined]
     recycled: list[Path] = []

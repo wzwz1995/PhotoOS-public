@@ -125,6 +125,14 @@ const state = {
   jobs: [],
   runningJobId: null,
   pollTimer: null,
+  /** 照片墙只在“会影响照片列表的任务”开始/结束时刷新一次，不在每个轮询里重建网格。 */
+  libraryRefreshKey: '',
+  /** 照片墙默认把一个 Shot 的多个文件折成一张卡；可切回按文件。 */
+  groupShots: (() => {
+    try { return localStorage.getItem('photoos.groupShots') !== '0'; } catch { return true; }
+  })(),
+  /** 网格实际渲染的卡片：按组时是 Shot 组，按文件时就是原始 asset。 */
+  displayItems: [],
   /** 最近一次导入预演的请求参数（执行时原样复用，保证"看到的计划"就是"执行的计划"）。 */
   importPlan: null,
   /** 由「确认执行」创建的那个导入任务 id（只用于在导入卡片里回显进度）。 */
@@ -134,6 +142,9 @@ const state = {
   inboxScanAttempts: 0,
   /** 最近一次收件箱状态（导入确认条要用它的 ready / bytes）。 */
   inboxData: null,
+  /** 收件箱导入任务：完成后自动复扫，让清理后的计数立刻反映出来。 */
+  inboxImportJobId: null,
+  inboxImportHandledJobId: null,
   /** ADB 拉取任务：卡片里回显进度用；完成时只做一次"交给收件箱"的交接。 */
   adbJobId: null,
   adbHandledJobId: null,
@@ -267,6 +278,73 @@ function setView(view) {
   }
 }
 
+/**
+ * 把 `/api/assets` 的文件列表折叠成"照片卡"。
+ *
+ * 数据库里一个 Shot 可含 JPG+NEF（实测 6,473 个多文件 Shot）；照片墙以前按文件画，
+ * 同一张照片出现两次，用户得逐个点。这里按 shot_id 聚合，封面优先选有缩略图的文件；
+ * 组内所有 asset 都保留在 `group_assets` 里，详情弹窗据此列出全部文件。
+ *
+ * 只在**已加载的页**内聚合：分页边界上的同组文件会在下一页到达后自动并进同一张卡，
+ * 因为每次都从完整 `state.items` 重建。
+ */
+function buildDisplayItems(items) {
+  if (!state.groupShots) return items.slice();
+  const groups = new Map();
+  const out = [];
+  for (const item of items) {
+    if (item.shot_id === null || item.shot_id === undefined) {
+      out.push({ ...item, isGroup: false, cover: item, group_assets: [item], asset_count: 1 });
+      continue;
+    }
+    const key = String(item.shot_id);
+    let group = groups.get(key);
+    if (!group) {
+      group = {
+        ...item,
+        isGroup: false,
+        cover: item,
+        group_assets: [],
+        asset_count: 0,
+        typeLabel: '',
+      };
+      groups.set(key, group);
+      out.push(group);
+    }
+    group.group_assets.push(item);
+    group.asset_count += 1;
+    if (!group.cover.has_thumb && item.has_thumb) group.cover = item;
+  }
+  for (const group of out) {
+    if (!group.group_assets) continue;
+    group.isGroup = group.asset_count > 1;
+    group.typeLabel = [...new Set(
+      group.group_assets.map((row) => String(row.file_type || '').toUpperCase()).filter(Boolean),
+    )].sort().join('+');
+  }
+  return out;
+}
+
+function summaryShots() {
+  const groups = buildDisplayItems(state.items);
+  return {
+    cards: groups.length,
+    files: state.items.length,
+  };
+}
+
+function updateGridSummary() {
+  const node = $('#grid-summary');
+  if (!node) return;
+  if (!state.total) { node.textContent = '没有匹配的照片'; return; }
+  if (!state.groupShots) {
+    node.textContent = `已显示 ${state.items.length} / ${state.total} 张`;
+    return;
+  }
+  const { cards, files } = summaryShots();
+  node.textContent = `已显示 ${cards} 组 / ${files} 张（共 ${state.total} 张）`;
+}
+
 // --------------------------------------------------------------------- 虚拟网格
 const grid = (() => {
   const scroll = $('#grid-scroll');
@@ -358,40 +436,56 @@ const grid = (() => {
 
   function paint(node, item, index, left, top) {
     lastPainted = item;
+    const cover = item.cover || item;
+    const group = item.isGroup ? item : null;
     node.style.transform = `translate(${left}px, ${top}px)`;
     node.style.width = `${cardWidth}px`;
     node.style.height = `${rowHeight - GAP}px`;
-    node.classList.toggle('is-missing', item.status === 'MISSING' || item.status === 'UNREADABLE');
+    node.classList.toggle(
+      'is-missing',
+      cover.status === 'MISSING' || cover.status === 'UNREADABLE',
+    );
     const image = node.querySelector('img');
-    const thumbUrl = `/api/assets/${item.id}/thumb`;
-    if (image.dataset.asset !== String(item.id)) {
-      image.dataset.asset = String(item.id);
-      if (item.has_thumb) {
+    const thumbUrl = `/api/assets/${cover.id}/thumb`;
+    if (image.dataset.asset !== String(cover.id)) {
+      image.dataset.asset = String(cover.id);
+      if (cover.has_thumb) {
         image.src = thumbUrl;
         image.style.visibility = 'visible';
       } else {
         image.removeAttribute('src');
         image.style.visibility = 'hidden';
       }
-      image.alt = describe(item);
+      image.alt = describe(cover);
+    }
+    // 角标：单个文件显示类型；折叠组显示“JPG+NEF · 2 个文件”，
+    // 按文件视图才显示 “NEF · 1/2”（用户要知道当前看的是组里第几个）。
+    const typeNode = node.querySelector('.type');
+    if (group) {
+      node.querySelector('.name').textContent = `${group.asset_count} 个文件 · ${describe(cover)}`;
+      typeNode.textContent = `${group.typeLabel || '文件'} · ${group.asset_count}`;
+      typeNode.title = '同一个拍摄组。点开可在详情里切换每个文件，并整组标记。';
+      node.classList.add('is-stacked');
+      node.onclick = () => openAssetDetail(cover.id);
+      return;
     }
     node.querySelector('.name').textContent = describe(item);
-    // 角标：单个文件显示类型；一组多个文件时**额外标出它在这一组里的位置**
-    // （"NEF · 1/2"）—— 用户才知道"这张照片还有另一个文件"、现在看的是哪个。
-    const group = fileGroup(index);
+    // ⚠️ 组视图下 index 是 **displayItems 下标**，而 fileGroup() 读的是
+    // state.items（原始 asset 下标）。两者在折叠后不再一一对应，混用会让一张
+    // 单文件卡错误地显示成「2/2」。组视图里不显示文件序号。
+    const position = state.groupShots ? null : fileGroup(index);
     const type = String(item.file_type || '').toUpperCase();
-    const typeNode = node.querySelector('.type');
-    typeNode.textContent = group ? `${type} · ${group.position}/${group.size}` : type;
-    typeNode.title = group
-      ? `这张照片在库里有 ${group.size} 个文件（当前第 ${group.position} 个）`
+    typeNode.textContent = position ? `${type} · ${position.position}/${position.size}` : type;
+    typeNode.title = position
+      ? `这张照片在库里有 ${position.size} 个文件（当前第 ${position.position} 个）`
       : '';
-    node.classList.toggle('is-stacked', Boolean(group));
+    node.classList.toggle('is-stacked', Boolean(position));
     node.onclick = () => openAssetDetail(item.id);
   }
 
   function render() {
     if (!started) return;
-    const count = state.items.length;
+    const count = state.displayItems.length;
     const viewportHeight = scroll.clientHeight;
     const totalRows = Math.ceil(count / columns);
     container.style.height = `${totalRows * rowHeight}px`;
@@ -406,7 +500,7 @@ const grid = (() => {
 
     for (let i = 0; i < visible; i += 1) {
       const index = firstIndex + i;
-      const item = state.items[index];
+      const item = state.displayItems[index];
       const row = Math.floor(index / columns);
       const column = index % columns;
       paint(pool[i], item, index, column * (cardWidth + GAP), row * rowHeight);
@@ -459,7 +553,14 @@ const grid = (() => {
     },
     setItems(items, append) {
       state.items = append ? state.items.concat(items) : items;
+      state.displayItems = buildDisplayItems(state.items);
       this.init();
+      measure();
+      render();
+    },
+    /** 只重算“折叠/按文件”的展示层，不重拉数据、不重置滚动。 */
+    rebuild() {
+      state.displayItems = buildDisplayItems(state.items);
       measure();
       render();
     },
@@ -472,6 +573,7 @@ const grid = (() => {
     relayout,
     reset() {
       state.items = [];
+      state.displayItems = [];
       container.style.height = '0px';
       ensurePool(0);
     },
@@ -599,7 +701,7 @@ async function waitForIndexThenRegroup(hint, jobId = null) {
       continue;
     }
     if (state === 'COMPLETED') {
-      if (hint) hint.textContent = '索引完成，正在分组（生成 Shot / Scene）…';
+      if (hint) hint.textContent = '索引完成，正在分组（生成拍摄组与场景）…';
       try {
         await API.post('/api/actions/regroup/run', {});
         if (hint) hint.textContent = '已开始分组。完成后点「刷新」即可浏览，精选页也会有内容。';
@@ -697,6 +799,24 @@ function showJobs() {
   });
 }
 
+function syncShotFoldButton() {
+  const button = $('#shot-fold-toggle');
+  if (!button) return;
+  button.textContent = state.groupShots ? '按拍摄组' : '按文件';
+  button.classList.toggle('primary', state.groupShots);
+  button.title = state.groupShots
+    ? '当前：同一个拍摄组折成一张卡。点一下切回按文件。'
+    : '当前：按文件查看。点一下按拍摄组折叠。';
+}
+
+function setShotFold(enabled) {
+  state.groupShots = Boolean(enabled);
+  try { localStorage.setItem('photoos.groupShots', state.groupShots ? '1' : '0'); } catch { /* 忽略隐私模式 */ }
+  syncShotFoldButton();
+  grid.rebuild();
+  updateGridSummary();
+}
+
 async function loadAssets({ append = false } = {}) {
   if (state.loading) return;
   if (append && state.offset >= state.total) return;
@@ -711,9 +831,11 @@ async function loadAssets({ append = false } = {}) {
     grid.rearm();
     const library = state.libraries.find((item) => item.id === state.activeLibraryId);
     const libraryEmpty = !library || !library.stats || (library.stats.assets ?? 0) === 0;
-    $('#grid-summary').textContent = payload.total !== 0
-      ? `已显示 ${state.items.length} / ${payload.total} 张`
-      : (libraryEmpty ? '这个库还没有照片' : '没有匹配的照片');
+    if (payload.total !== 0) {
+      updateGridSummary();
+    } else {
+      $('#grid-summary').textContent = libraryEmpty ? '这个库还没有照片' : '没有匹配的照片';
+    }
     if (payload.total === 0 && libraryEmpty) {
       showGridError(emptyLibraryHtml(library), () => loadAssets());
       bindEmptyLibrary();
@@ -728,6 +850,7 @@ async function loadAssets({ append = false } = {}) {
     toast(`加载失败：${error.message}`, true);
     state.total = 0;
     state.items = [];
+    state.displayItems = [];
     grid.reset();
     grid.setItems([], false);
     const summary = $('#grid-summary');
@@ -1193,24 +1316,23 @@ async function loadLibraries() {
   list.innerHTML = libraries.map((library) => `
     <div class="library-card ${library.id === state.activeLibraryId ? 'is-active' : ''}" data-library="${library.id}">
       <div class="name">
-        <span>${escapeHtml(library.name)}</span>
+        <span class="lib-name" title="${escapeHtml(library.name)}">${escapeHtml(library.name)}</span>
         <span class="badge ${library.status === 'ONLINE' ? 'online' : 'offline'}">
           ${library.status === 'ONLINE' ? '在线' : '离线'}
-        </span>
-        <span class="library-actions">
-          ${(library.asset_count || 0) > 0
-            ? `<button class="library-op" data-library-reset="${library.id}"
-                       title="删掉索引与缩略图，保留库和目录，用来重建索引">重置索引</button>` : ''}
-          <button class="library-op is-danger" data-library-remove="${library.id}"
-                  title="删掉索引与该库登记（照片文件不动）">移除库</button>
         </span>
       </div>
       <div class="path">${escapeHtml(library.root_path_hint || '(未记录路径)')}</div>
       <div class="meta">
-        ${library.asset_count} 个文件 · ${humanBytes(library.stats.assets_bytes)} ·
-        已哈希 ${library.stats.hashed ?? 0} · 预览 ${library.stats.previews}
+        ${library.asset_count} 个文件 · ${humanBytes(library.stats.assets_bytes)}
       </div>
-    </div>`).join('') || '<div class="hint">尚未登记照片库。点上方「+ 添加…」选择照片目录。</div>';
+      <div class="library-actions">
+        ${(library.asset_count || 0) > 0
+          ? `<button class="library-op" data-library-reset="${library.id}"
+                     title="删掉索引与缩略图，保留库和目录，用来重建索引">重置索引</button>` : ''}
+        <button class="library-op is-danger" data-library-remove="${library.id}"
+                title="删掉索引与该库登记（照片文件不动）">移除库</button>
+      </div>
+    </div>`).join('') || '<div class="hint">还没有照片库。到「维护 → 导入新照片」导入照片；在「照片落在哪」填一个目录，就会建立照片库。</div>';
 
   list.querySelectorAll('[data-library-remove]').forEach((button) => {
     button.onclick = async (event) => {
@@ -1581,6 +1703,14 @@ export async function openAssetDetail(assetId) {
       API.get('/api/collections').catch(() => ({ items: [] })),
       API.get(`/api/assets/${assetId}/tags`).catch(() => null),
     ]);
+    const shotAssets = detail.shot_id
+      ? await API.get(`/api/shots/${detail.shot_id}/assets`).catch(() => null)
+      : null;
+    const shotItems = shotAssets?.items || [];
+    // 旧后端没有 `rejected` 字段；不要渲染一个点了必然 404 的按钮。
+    const shotRejectSupported = shotItems.length > 1
+      && Object.prototype.hasOwnProperty.call(shotItems[0], 'rejected');
+    const shotAllMarked = shotRejectSupported && shotItems.every((row) => row.rejected);
     const meta = detail.metadata || {};
     const isVideo = detail.file_type === 'video';
     const canRenderInline = INLINE_IMAGE_TYPES.has(detail.file_type);
@@ -1604,7 +1734,7 @@ export async function openAssetDetail(assetId) {
       notices.push('该文件当前不在硬盘上。索引、缩略图与元数据依然可用；插回硬盘后原图即可访问。');
     }
     if (!detail.has_preview) {
-      notices.push('尚未生成预览。运行 `photoos index` 或点击维护页的「生成缩略图」。');
+      notices.push('尚未生成预览。到「维护 → 数据维护 → 命令」执行「索引新照片」，或运行 `photoos index`。');
     }
     if (!canRenderInline && !isVideo) {
       notices.push(
@@ -1667,11 +1797,26 @@ export async function openAssetDetail(assetId) {
         : '<p class="hint">这张还没有生成预览。</p>');
 
     const tagRow = tagsHtml(tags, detail);
+    const shotStrip = shotItems.length > 1 ? `
+        <h3>这个拍摄组的 ${shotItems.length} 个文件</h3>
+        <div class="shot-strip">
+          ${shotItems.map((row) => `
+            <button type="button" class="shot-strip-item ${Number(row.id) === Number(detail.id) ? 'is-current' : ''}"
+                    data-shot-asset="${row.id}" title="${escapeHtml(row.name)}">
+              <img src="/api/assets/${row.id}/thumb" alt="" loading="lazy">
+              <span>${escapeHtml(String(row.file_type || '').toUpperCase())}</span>
+            </button>`).join('')}
+        </div>
+        ${shotRejectSupported ? `<button class="btn small ${shotAllMarked ? 'primary' : ''}"
+          id="shot-reject" type="button">
+          ${shotAllMarked ? `取消整组废片标记（${shotItems.length}）` : `整组标记废片（${shotItems.length}）`}
+        </button>` : ''}` : '';
 
     $('#asset-modal-body').innerHTML = `
       <div class="asset-modal-stage">${stage}</div>
       <div class="asset-modal-side">
         ${tagRow}
+        ${shotStrip}
         <h3>原片在哪</h3>
         <div class="asset-path">
           <span class="asset-path-line" id="asset-path-absolute">${escapeHtml(absolute || relative || '（库里没有路径记录）')}</span>
@@ -1712,6 +1857,39 @@ export async function openAssetDetail(assetId) {
 
     bindTagActions(tags, detail);
     bindCollectActions(detail);
+
+    // Shot 胶片条：折叠成一张卡后，点开仍能看到/切换到组里每一个文件。
+    document.querySelectorAll('[data-shot-asset]').forEach((button) => {
+      button.onclick = () => openAssetDetail(Number(button.dataset.shotAsset));
+    });
+    const shotReject = $('#shot-reject');
+    if (shotReject) {
+      shotReject.onclick = async () => {
+        shotReject.disabled = true;
+        const target = !shotItems.every((row) => row.rejected);
+        try {
+          const result = await API.post(`/api/shots/${detail.shot_id}/reject`, { marked: target });
+          shotItems.forEach((row) => { row.rejected = target; });
+          detail.rejected = target;
+          if (rejectButton) {
+            rejectButton.textContent = target ? '取消废片标记' : '标记为废片';
+            rejectButton.classList.toggle('primary', target);
+          }
+          shotReject.textContent = target
+            ? `取消整组废片标记（${result.count}）`
+            : `整组标记废片（${result.count}）`;
+          shotReject.classList.toggle('primary', target);
+          toast(target
+            ? `已把本组 ${result.count} 个文件标为废片（可随时取消）`
+            : `已取消本组 ${result.count} 个文件的废片标记`);
+          loadRejects({ silent: true });
+        } catch (error) {
+          toast(`整组标记失败：${error.message}`, true);
+        } finally {
+          shotReject.disabled = false;
+        }
+      };
+    }
 
     const copy = $('#asset-copy-path');
     if (copy) {
@@ -1987,6 +2165,7 @@ async function refreshJobs() {
     renderImportTaskFromState();
     renderAdbTaskFromState();
     maybeHandoffAdbJob();
+    maybeRefreshInboxAfterImport();
     maybeRefreshAfterRejectCleanup();
   } catch (error) {
     if (state.view === 'maintenance') toast(`任务列表加载失败：${error.message}`, true);
@@ -1997,6 +2176,12 @@ const IMPORT_TASK_STATES = {
   PENDING: '排队中', PROCESSING: '进行中', RETRY: '重试中', PAUSED: '已暂停',
   COMPLETED: '已完成', FAILED: '失败', CANCELLED: '已取消',
 };
+
+/** 只有这些任务会改变照片墙的内容；ADB 拉取、备份、导出、打包都不该重载网格。 */
+const LIBRARY_REFRESH_JOB_TYPES = new Set([
+  'scan', 'hash', 'metadata', 'preview', 'fused', 'full_index',
+  'classify_import', 'reject_cleanup', 'regroup', 'rebind',
+]);
 
 /** 导入卡片里那条"本次任务"状态（B 方案：把反馈放回按钮下面）。 */
 function renderImportTask(job) {
@@ -2024,7 +2209,8 @@ function renderImportTask(job) {
         <button class="btn small" data-import-job="${job.id}" data-action="cancel">取消</button>` : ''}
       <button class="btn small ghost" id="import-task-more">查看全部任务 ↓</button>
     </div>
-    ${total ? `<div class="import-task-bar"><i style="width:${percent}%"></i></div>` : ''}`;
+    ${total ? `<div class="import-task-bar"><i style="width:${percent}%"></i></div>` : ''}
+    ${job.note ? `<div class="job-meta">${escapeHtml(String(job.note).slice(0, 300))}</div>` : ''}`;
   node.querySelectorAll('button[data-import-job]').forEach((button) => {
     button.onclick = async () => {
       button.disabled = true;
@@ -2052,6 +2238,23 @@ function renderImportTaskFromState() {
   renderImportTask(job || null);
 }
 
+/** 收件箱导入完成后复扫一次：清理过的文件不应继续显示为「已导入」。 */
+function maybeRefreshInboxAfterImport() {
+  if (!state.inboxImportJobId || state.view !== 'maintenance') return;
+  const job = (state.jobs || []).find(
+    (item) => Number(item.id) === Number(state.inboxImportJobId),
+  );
+  if (!job || !['COMPLETED', 'FAILED', 'CANCELLED'].includes(job.status)) return;
+  if (Number(state.inboxImportHandledJobId) === Number(job.id)) return;
+  state.inboxImportHandledJobId = Number(job.id);
+  if (job.status === 'COMPLETED') scanInbox({ silent: true });
+}
+
+/** 任务进度值的人类单位：ADB 拉取按字节，其余按文件/条目计数。 */
+function jobAmount(job, value) {
+  return job && job.progress_unit === 'bytes' ? humanBytes(Number(value) || 0) : String(value);
+}
+
 /** ADB 拉取任务卡片（与导入任务同一套样式，节点分开，避免互相覆盖）。 */
 function renderAdbTask(job) {
   const node = $('#adb-task');
@@ -2071,7 +2274,8 @@ function renderAdbTask(job) {
     <div class="import-task-head">
       <b>拉取任务 #${job.id}</b>
       <span class="import-task-state is-${String(job.status).toLowerCase()}">${stateText}</span>
-      <span class="import-task-num">${total ? `${done} / ${total} · ${percent.toFixed(1)}%` : ''}</span>
+      <span class="import-task-num">${total
+        ? `${jobAmount(job, done)} / ${jobAmount(job, total)} · ${percent.toFixed(1)}%` : ''}</span>
       <span class="spacer"></span>
       ${job.status === 'COMPLETED'
         ? '<button class="btn small" id="adb-task-inbox">去收件箱导入 ↓</button>' : ''}
@@ -2123,7 +2327,11 @@ function maybeHandoffAdbJob() {
 /** 跳到收件箱并扫描（拉取完成后的下一步；用户也可以随时手动点）。 */
 async function goToInbox({ announce = false } = {}) {
   const panel = $('#inbox-panel');
-  if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  if (panel) {
+    // 收件箱现在是折叠组；从 ADB 任务交接过来时先展开，否则用户只会看到一行摘要。
+    if ('open' in panel) panel.open = true;
+    panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
   state.inboxScanAttempts = 0;
   if (announce) toast('已跳到收件箱：正在扫描刚拉取的文件');
   await scanInbox();
@@ -2157,7 +2365,8 @@ function renderJobs() {
     const doneLines = Number(job.progress_done) || 0;
     let progressText;
     if (hasTotal) {
-      progressText = `${job.progress_done} / ${job.progress_total}（${percent.toFixed(1)}%）`;
+      progressText = `${jobAmount(job, job.progress_done)} / `
+        + `${jobAmount(job, job.progress_total)}（${percent.toFixed(1)}%）`;
     } else if (isCommand) {
       progressText = doneLines
         ? `已输出 ${doneLines} 行`
@@ -2173,7 +2382,7 @@ function renderJobs() {
         </div>
         <div class="job-meta">
           ${progressText}
-          ${job.library_id ? ` · Library #${job.library_id}` : ''}
+          ${job.library_id ? ` · 照片库 #${job.library_id}` : ''}
           ${job.retry_count ? ` · 重试 ${job.retry_count}` : ''}
         </div>
         ${job.note ? `<div class="job-meta">${escapeHtml(job.note)}</div>` : ''}
@@ -2293,13 +2502,16 @@ async function refreshHealth() {
     // 它的用处只有一个：让"我浏览器里是不是最新那份前端"可核对 ——
     // 这个项目零构建、文件名无内容哈希，出问题时只能靠 Ctrl+F5 猜是不是缓存。
     // 右上角这个号码与 `GET /api/health` 的 `ui_build` 一致，就说明浏览器拿的是最新代码。
-    const build = health.ui_build ? ` · 前端 ${health.ui_build}` : '';
-    $('#health-text').textContent =
-      `v${health.version} · schema ${health.schema_version}${build}${running}`;
-    $('#health-text').title = health.ui_build
-      ? `前端资源指纹 ${health.ui_build}（改前端会变）。若与 /api/health 不一致，`
-        + '说明浏览器还在用旧资源，按 Ctrl+F5 强制刷新。'
-      : '';
+    // 顶栏只留“连上了没有 + 有没有任务在跑”；schema 与前端指纹放进悬停说明。
+    // 这些数字是排障用的，不该每天占着页面右上角。
+    $('#health-text').textContent = `v${health.version} · 已连接${running}`;
+    const details = [
+      `schema ${health.schema_version}`,
+      health.ui_build ? `前端资源指纹 ${health.ui_build}` : '',
+    ].filter(Boolean).join(' · ');
+    $('#health-text').title = details + (health.ui_build
+      ? '（若与 /api/health 不一致，按 Ctrl+F5 强制刷新）'
+      : '');
   } catch (error) {
     $('#health-dot').className = 'dot fail';
     $('#health-text').textContent = `服务不可用：${error.message}`;
@@ -2425,7 +2637,7 @@ async function saveSceneConfig() {
     const result = await API.post('/api/config/scene', payload);
     const keys = Object.keys(result.updated || {}).length;
     if (hint) hint.textContent = `已保存 ${keys} 项。下次「现在分组」会按新阈值切分。`;
-    toast(`已保存 ${keys} 项 Scene 阈值`);
+    toast(`已保存 ${keys} 项场景阈值`);
     await refreshSceneConfig();
   } catch (error) {
     if (hint) hint.textContent = `保存失败：${error.message}`;
@@ -2970,6 +3182,10 @@ function bindEvents() {
   grid.setOnNearBottom(() => {
     if (state.offset < state.total) loadMore();
   });
+  if ($('#shot-fold-toggle')) {
+    $('#shot-fold-toggle').onclick = () => setShotFold(!state.groupShots);
+  }
+  syncShotFoldButton();
 
   document.querySelectorAll('button[data-run]').forEach((button) => {
     button.onclick = () => startJob(button.dataset.run);
@@ -2999,6 +3215,7 @@ function bindEvents() {
   }
   if ($('#inbox-open')) $('#inbox-open').onclick = openInbox;
   if ($('#inbox-import')) $('#inbox-import').onclick = prepareInboxImport;
+  if ($('#inbox-cleanup-now')) $('#inbox-cleanup-now').onclick = cleanupInboxNow;
   if ($('#inbox-confirm-yes')) $('#inbox-confirm-yes').onclick = runInboxImport;
   if ($('#inbox-confirm-no')) $('#inbox-confirm-no').onclick = cancelInboxImport;
   if ($('#import-library')) {
@@ -3462,6 +3679,9 @@ async function scanInbox({ silent = false } = {}) {
     renderInbox(data);
     return data;
   } catch (error) {
+    const summary = $('#inbox-summary');
+    if (summary) summary.textContent = '收件箱读取失败';
+    $('#inbox-panel')?.classList.remove('is-ready');
     if (!silent) node.textContent = `读取收件箱失败：${error.message}`;
     return null;
   }
@@ -3475,10 +3695,18 @@ function renderInbox(data) {
   const node = $('#inbox-status');
   const importButton = $('#inbox-import');
   if (importButton) importButton.disabled = !data.ready;
+  const cleanupButton = $('#inbox-cleanup-now');
+  if (cleanupButton) cleanupButton.disabled = !data.imported;
   renderInboxTarget();
   if (!node) return;
 
+  const summary = $('#inbox-summary');
+  const panel = $('#inbox-panel');
+  const ready = Number(data.ready) || 0;
+  if (panel) panel.classList.toggle('is-ready', ready > 0);
+
   if (!data.exists) {
+    if (summary) summary.textContent = '收件箱尚未创建';
     node.innerHTML = '收件箱还不存在。点「打开收件箱」会创建它，然后把手机里的照片<strong>复制</strong>进去。';
     return;
   }
@@ -3490,6 +3718,14 @@ function renderInbox(data) {
   ];
   if (data.empty) parts.push(`空文件 ${data.empty} 个`);
   if (data.ready) parts.push(`共 ${humanBytes(data.ready_bytes)}`);
+  if (summary) {
+    // 收起时这一行就是用户在维护页看到的全部信息：可导入多少、还在复制多少。
+    summary.textContent = [
+      `可导入 ${data.ready} 个`,
+      `复制中 ${data.copying} 个`,
+      `已导入 ${data.imported} 个`,
+    ].join(' · ');
+  }
   let html = `<div>${parts.join(' · ')}</div>`;
 
   (data.warnings || []).forEach((warning) => {
@@ -3517,6 +3753,28 @@ function renderInbox(data) {
     state.inboxScanAttempts += 1;
     if (state.inboxTimer) clearTimeout(state.inboxTimer);
     state.inboxTimer = setTimeout(() => scanInbox({ silent: true }), 4000);
+  }
+}
+
+/** 手动清理已入库副本：给"导入时没勾选"或"旧版本已经导完"的用户一个入口。 */
+async function cleanupInboxNow() {
+  const data = state.inboxData;
+  const count = Number(data?.imported) || 0;
+  if (!count) return;
+  if (!window.confirm(
+    `清理收件箱里 ${count} 个已安全入库的副本？\n\n`
+    + '只删除台账可核对、目标仍在库里的文件；失败或目标不存在的会保留。'
+    + '手机和照片库里的文件不会动。',
+  )) return;
+  const button = $('#inbox-cleanup-now');
+  if (button) button.disabled = true;
+  try {
+    const result = await API.post('/api/inbox/cleanup', { confirmed: true });
+    toast(result.summary, Boolean(result.errors?.length));
+    await scanInbox({ silent: true });
+  } catch (error) {
+    toast(`清理失败：${error.message}`, true);
+    if (button) button.disabled = false;
   }
 }
 
@@ -3564,11 +3822,15 @@ function prepareInboxImport() {
   const bar = $('#inbox-confirm');
   const text = $('#inbox-confirm-text');
   if (!bar || !text) { toast('界面缺少确认条，请刷新页面', true); return; }
+  const cleanup = Boolean($('#inbox-cleanup')?.checked);
   text.innerHTML = `将把 <strong>${data.ready} 个文件（${humanBytes(data.ready_bytes)}）</strong>`
     + `复制进 #${library.id} ${escapeHtml(library.name)} 的 `
     + `<span class="mono">${escapeHtml(library.root_path_hint || '')}</span>，`
     + '按 <span class="mono">&lt;城市&gt;\\&lt;日期&gt;_&lt;时段&gt;\\</span> 归档；'
-    + '<strong>收件箱里的文件保留，手机也不动。</strong>'
+    + (cleanup
+      ? '<strong>导入成功后，会删除收件箱里已核对在库的副本（包括以前导入的）；'
+        + '失败或目标不存在的文件保留。手机文件不动。</strong>'
+      : '<strong>收件箱里的文件保留，手机也不动。</strong>')
     + '导入完成后会自动补缩略图并重算分组。';
   bar.hidden = false;
   bar.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -3585,16 +3847,21 @@ async function runInboxImport() {
   if (button) button.disabled = true;
   if (yes) yes.disabled = true;
   try {
+    const cleanup = Boolean($('#inbox-cleanup')?.checked);
     const payload = {
       confirmed: true,
       library_id: Number($('#import-library')?.value) || null,
       video_library_id: Number($('#import-video-library')?.value) || null,
       city: ($('#import-city')?.value || '').trim() || null,
+      cleanup_after_import: cleanup,
     };
     const result = await API.post('/api/inbox/import', payload);
     cancelInboxImport();
-    toast(`已创建导入任务 #${result.job.id}：${result.ready} 个文件（收件箱源文件保留）`);
+    toast(`已创建导入任务 #${result.job.id}：${result.ready} 个文件`
+      + (cleanup ? '（成功后清理已入库的收件箱副本）' : '（收件箱源文件保留）'));
     state.importJobId = Number(result.job.id);
+    state.inboxImportJobId = Number(result.job.id);
+    state.inboxImportHandledJobId = null;
     renderImportTask(result.job);
     await refreshJobs();
     await loadAssets();
@@ -3888,11 +4155,29 @@ async function boot() {
     refreshHealth();
     refreshJobs();
     if (state.view === 'library') {
-      // 索引在跑时，定期刷新统计与列表，让用户看到进度带来的变化
-      const active = state.jobs.some((job) => ['PROCESSING', 'PENDING', 'RETRY'].includes(job.status));
-      if (active) {
-        loadAssets();
-        loadLibraries();
+      // ⚠️ 照片墙不能每 4 秒重建一次。以前只要**任意**任务在跑就 loadAssets()，
+      // 连 ADB 拉取（跟照片列表毫无关系）也会让网格每隔 4 秒跳一下；
+      // 而且索引/导入跑十分钟，用户就十分钟没法安稳滚动。
+      // 现在只在“会影响照片列表的任务”开始/结束时刷新一次。
+      const key = (state.jobs || [])
+        .filter((job) => {
+          const affectsLibrary = LIBRARY_REFRESH_JOB_TYPES.has(job.type)
+            || (job.type === 'cli_action'
+              && ['index', 'index_library'].includes(job.action_id));
+          return affectsLibrary
+            && ['PROCESSING', 'PENDING', 'RETRY', 'PAUSED'].includes(job.status);
+        })
+        .map((job) => `${job.id}:${job.status}`)
+        .sort()
+        .join(',');
+      if (key !== state.libraryRefreshKey) {
+        const previous = state.libraryRefreshKey;
+        state.libraryRefreshKey = key;
+        // 开始和结束各刷一次；中间的进度更新不碰网格。
+        if (key || previous) {
+          loadAssets();
+          loadLibraries();
+        }
       }
     }
   }, 4000);

@@ -54,6 +54,8 @@ class CliAction:
     argv: tuple[str, ...]
     #: 需要用户提供一个搜索词（只有 search 类动作需要）
     needs_query: bool = False
+    #: 需要用户提供一个实际 prompt（改词义/重建词向量用）
+    needs_prompt: bool = False
     #: 需要指出对哪个 Library 执行（多库时必须，否则 CLI 会拒绝）
     needs_library: bool = False
     #: 会下载大文件或跑很久 —— 界面上要提前说清楚
@@ -87,7 +89,7 @@ CATALOG: tuple[CliAction, ...] = (
     CliAction(
         id="index_library",
         label="索引这个库",
-        description="只扫描指定的 Library（多库时 CLI 必须带 --library，否则会拒绝执行）。",
+        description="只扫描指定的照片库（有多个库时必须明确选一个）。",
         group="索引",
         argv=("-m", "photoos", "index", "--library", "{library}", "--wait"),
         needs_library=True,
@@ -104,9 +106,19 @@ CATALOG: tuple[CliAction, ...] = (
         requires=("torch", "sentence_transformers"),
     ),
     CliAction(
+        id="search_rebuild",
+        label="按新 prompt 重建关键词",
+        description="保留中文标签，换掉实际送进模型的 prompt；重算文本向量与命中快照。",
+        group="找照片",
+        argv=("-m", "photoos", "search", "{query}", "--prompt", "{prompt}", "--save", "--top", "200"),
+        needs_query=True,
+        needs_prompt=True,
+        requires=("torch", "sentence_transformers"),
+    ),
+    CliAction(
         id="stats",
-        label="看库的总体情况",
-        description="每个 Library 有多少张、多少城市、多少时段 —— 用来判断该不该重跑索引。",
+        label="查看库统计",
+        description="每个照片库有多少张、多少城市、多少时段，用来判断该不该重跑索引。",
         group="索引",
         argv=("-m", "photoos", "stats"),
     ),
@@ -123,7 +135,7 @@ CATALOG: tuple[CliAction, ...] = (
     CliAction(
         id="embed_clip",
         label="算 CLIP 向量",
-        description="CLIP 图像向量（Scene 划分与相似度用；本机**只下视觉塔**，没有文字编码器，所以不能拿它搜图）。",
+        description="CLIP 图像向量，用于场景划分与相似度；本机只装视觉模型，不能拿文字搜图。",
         group="向量",
         argv=("-m", "photoos", "embed", "--engine", "clip", "--apply"),
         long_running=True,
@@ -248,8 +260,20 @@ def validate_query(raw: Any) -> str:
     return text
 
 
+def validate_prompt(raw: Any) -> str:
+    """校验“实际送进模型的 prompt”。只做字符白名单，不允许换行。"""
+    text = str(raw or "").strip()
+    if not text:
+        raise ValueError("prompt 不能为空")
+    if len(text) > 200:
+        raise ValueError("prompt 最长 200 个字符")
+    if not re.match(r"^[\w\u4e00-\u9fff][\w\u4e00-\u9fff \-·.,、，。/']{0,199}$", text):
+        raise ValueError("prompt 只能包含中文、字母、数字、空格与常用标点")
+    return text
+
+
 def resolve_argv(action: CliAction, *, query: str | None = None,
-                 library: int | None = None) -> list[str]:
+                 prompt: str | None = None, library: int | None = None) -> list[str]:
     """把动作模板展开成真正的 argv。
 
     用户输入只可能出现在 **query（已过白名单）** 与 **library（已在接口层校验成整数）**
@@ -263,6 +287,12 @@ def resolve_argv(action: CliAction, *, query: str | None = None,
             if query is None:
                 raise ValueError("这个动作需要一个搜索词")
             out.append(query)
+        elif token == "{prompt}":
+            if not action.needs_prompt:
+                raise ValueError(f"动作 {action.id} 不该出现 prompt 占位符")
+            if prompt is None:
+                raise ValueError("这个动作需要一个 prompt")
+            out.append(prompt)
         elif token == "{library}":
             if not action.needs_library:
                 raise ValueError(f"动作 {action.id} 不该出现 library 占位符")
@@ -275,6 +305,8 @@ def resolve_argv(action: CliAction, *, query: str | None = None,
         raise ValueError("这个动作需要一个搜索词")
     if action.needs_library and library is None:
         raise ValueError("这个动作需要指定 Library")
+    if action.needs_prompt and prompt is None:
+        raise ValueError("这个动作需要一个 prompt")
     return out
 
 
@@ -349,7 +381,7 @@ def interpreter(settings: Any, action: "CliAction | None" = None) -> tuple[str, 
     而 EG2 装在旁边那个 spike venv 里，于是页面能搜却不能算）。
     """
     if not _needs_ai_env(action):
-        return sys.executable, "服务自身解释器（这个动作不需要 torch）"
+        return sys.executable, "服务自身的 Python（这个动作不需要 AI 环境）"
 
     configured = getattr(settings, "ai_python", None)
     if configured:
@@ -394,18 +426,24 @@ def catalog_payload(settings: Any) -> dict[str, Any]:
     for action in CATALOG:
         # 缺依赖的动作**不隐藏**，只是标记出来 —— 藏起来用户永远不知道有这个能力，
         # 而"缺什么、怎么补"正是他此刻需要知道的信息。
-        missing = [m for m in action.requires if not env["modules"].get(m, True)]
+        # ⚠️ 必须用**这条动作自己的解释器**探测。以前统一用环境报告里的
+        # 服务 python，于是 torch 装在独立 AI venv 时，所有 AI 动作都显示
+        # “缺少 torch”，但实际点下去又能跑 —— 状态和事实相反。
+        python, _reason = interpreter(settings, action)
+        missing = [m for m in action.requires if not module_available(m, python)]
         actions.append({
             "id": action.id,
             "label": action.label,
             "description": action.description,
             "group": action.group,
             "needs_query": action.needs_query,
+            "needs_prompt": action.needs_prompt,
             "long_running": action.long_running,
             "enqueue_job": action.enqueue_job,
             "requires": list(action.requires),
             "missing_requires": missing,
             "available": not missing,
+            "python": python if _needs_ai_env(action) else None,
         })
     return {"environment": env, "actions": actions}
 

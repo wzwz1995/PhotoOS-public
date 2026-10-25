@@ -23,7 +23,7 @@
 .asset-modal {
   position: fixed;
   inset: 0;
-  z-index: 60;                 /* 高于抽屉（30）与 toast（40） */
+  z-index: 120;                /* 场景复核（95）里看大图时必须压在最上面 */
   display: flex;
   align-items: center;
   justify-content: center;
@@ -272,6 +272,15 @@
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 10px;
+}
+
+/* 弹窗里的“小按钮”也至少 38px 高：关闭 / 复制路径 / 在资源管理器显示
+   都是会反复点的动作，34px 在触控板和触屏上都偏窄。 */
+.asset-modal .btn.small,
+.pack-result .btn.small {
+  min-height: 38px;
+  padding: 0 13px;
+  font-size: 13.5px;
 }
 
 .asset-path-state {

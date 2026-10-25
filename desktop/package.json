@@ -1,6 +1,6 @@
 {
   "name": "photoos-desktop",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "PhotoOS 桌面壳（Electron）：把本机 127.0.0.1 上的 PhotoOS 装进一个原生窗口",
   "main": "main.js",

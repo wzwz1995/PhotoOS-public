@@ -159,6 +159,9 @@ def test_extension_sets_are_disjoint_and_cover_prd_requirements() -> None:
     # 既有流水线的 bookkeeping 目录绝不能被当成照片扫描
     assert "_归类清单" in SKIP_DIR_NAMES
     assert "$recycle.bin" in SKIP_DIR_NAMES
+    # 手机相机的临时目录：adb pull 会整树拉下来，但扫描器不该把它们当照片
+    assert ".temp" in SKIP_DIR_NAMES
+    assert ".dolly_zoom" in SKIP_DIR_NAMES
 
 
 def test_generator_version_is_a_constant() -> None:

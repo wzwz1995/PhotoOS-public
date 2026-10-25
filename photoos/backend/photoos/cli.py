@@ -1925,7 +1925,12 @@ def cmd_search(args: argparse.Namespace) -> int:
     if getattr(args, "save", False):
         from .library.vectorstore import pack_vector
 
-        hits = [(shot, rank, score, prim) for shot, rank, score, prim, _row in picked]
+        # 只存**这次实际返回给用户看的前 top 组**。`picked` 来自最多 4×top
+        # 个候选资产（为了 RAW/JPG 去重多取了一些），不过滤直接 save 会存下
+        # 300+ 组，和 `--top 200` 显示的上限对不上 —— 也让界面出现
+        # “每个词都是 200/332 组”的假象。候选池的语义必须与展示一致。
+        hits = [(shot, rank, score, prim)
+                for shot, rank, score, prim, _row in picked[:top]]
         written = SemanticRepo(db).save_hits(
             query_text=query, prompt_text=prompt, text_kind="query",
             model=embedder.model, model_version=embedder.model_version, dim=embedder.dim,
@@ -3027,7 +3032,9 @@ def cmd_shots_regroup(args: argparse.Namespace) -> int:
     _print()
     _kv("置信度分布", "，".join(f"{k:.2f}: {v}" for k, v in sorted(dist.items(), reverse=True)))
 
-    if args.json:
+    # `--json` 只用于预演输出。以前这里先于 `--apply` 返回：`--apply --json`
+    # 看起来执行成功，实际一个字节都没写；真机重算分组时踩过这个坑。
+    if args.json and not args.apply:
         _print(json.dumps(
             {
                 "gap_seconds": gap,

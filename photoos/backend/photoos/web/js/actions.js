@@ -46,9 +46,10 @@ export function environmentLine() {
  * `query` 只有 `needs_query` 的动作会被服务端读取；其余动作传了也会被忽略
  * —— 前端不做这个判断，判断权在服务端（单一真相）。
  */
-export async function runAction(id, { query } = {}) {
+export async function runAction(id, { query, prompt } = {}) {
   const body = {};
   if (query !== undefined) body.query = query;
+  if (prompt !== undefined) body.prompt = prompt;
   return API.post(`/api/actions/${encodeURIComponent(id)}/run`, body);
 }
 
@@ -151,8 +152,7 @@ export async function openActionsDialog({ title = '直接执行命令', group, o
       </div>
       <div class="act-body">
         <p class="hint">
-          这些命令由<strong>服务端固定</strong>，你只能选、不能改 ——
-          界面不接受任意命令输入。执行走后台任务，可以关掉这个窗口。
+          命令由<strong>服务端固定</strong>，只能选、不能改。执行走后台任务，关掉这个窗口也不会中断。
         </p>
         <div class="act-env">
           <span class="act-env-label">执行环境</span>
@@ -202,11 +202,11 @@ export async function openActionsDialog({ title = '直接执行命令', group, o
  * 这是所有入口（弹窗 / 「立即准备」按钮 / 维护页面板）共用的那一条路径 ——
  * 三处各写一遍必然出现"同一件事三种反馈"。
  */
-export async function submitAction(action, { query, button, silent = false } = {}) {
+export async function submitAction(action, { query, prompt, button, silent = false } = {}) {
   const restore = button ? button.textContent : null;
   if (button) { button.disabled = true; button.textContent = '提交中…'; }
   try {
-    const result = await runAction(action.id, { query });
+    const result = await runAction(action.id, { query, prompt });
     if (!result.queued) {
       toast(result.reason || '已有一条命令在队列里', true);
       return result;
@@ -256,6 +256,8 @@ export async function renderActionsPanel(node) {
   try {
     payload = await loadCatalog(true);
   } catch (error) {
+    const summary = $('#actions-summary');
+    if (summary) summary.textContent = '命令目录读取失败';
     node.innerHTML = `<p class="hint">命令目录读取失败：${escapeHtml(error.message)}</p>`;
     return;
   }
@@ -266,11 +268,18 @@ export async function renderActionsPanel(node) {
     if (!groups.has(action.group)) groups.set(action.group, []);
     groups.get(action.group).push(action);
   }
+
+  // 收起状态也要能回答「里面有多少条、有没有缺依赖」，否则用户还得先展开。
+  const summary = $('#actions-summary');
+  if (summary) {
+    const unavailable = payload.actions.filter((a) => !a.available).length;
+    summary.textContent = [
+      `${payload.actions.length} 条`,
+      unavailable ? `${unavailable} 条缺依赖` : '依赖齐全',
+    ].join(' · ');
+  }
+
   node.innerHTML = `
-    <p class="hint">
-      这些命令由<strong>服务端固定</strong>，界面只能选、不能改参数 ——
-      所以它不会变成"在浏览器里执行任意命令"。执行走后台任务，可暂停/取消。
-    </p>
     <div class="act-env">
       <span class="act-env-label">执行环境</span>
       <code>${escapeHtml(env.python)}</code>
@@ -431,7 +440,7 @@ export function createProgressPanel(container, { command, label } = {}) {
  * 在给定容器里跑一条动作，并把进度画出来。
  * 三个入口（找照片空态 / 人物空态 / 维护页面板）共用这一条路径。
  */
-export async function runActionWithProgress(action, container, { query, button, label } = {}) {
+export async function runActionWithProgress(action, container, { query, prompt, button, label } = {}) {
   const panel = createProgressPanel(container, {
     command: action.command_preview,
     label: label || action.label,
@@ -440,7 +449,7 @@ export async function runActionWithProgress(action, container, { query, button, 
   if (button) { button.disabled = true; button.textContent = '提交中…'; }
 
   try {
-    const result = await runAction(action.id, { query });
+    const result = await runAction(action.id, { query, prompt });
     if (!result.queued) {
       toast(result.reason || '已有一条命令在队列里', true);
       panel.finish({ status: 'CANCELLED' });

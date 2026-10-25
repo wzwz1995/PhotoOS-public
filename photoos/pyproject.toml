@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "photoos"
-version = "0.2.0"
+version = "0.2.1"
 description = "PhotoOS - 个人摄影管理系统 (Photo Library Foundation, Phase 1)"
 readme = "README.md"
 requires-python = ">=3.12"

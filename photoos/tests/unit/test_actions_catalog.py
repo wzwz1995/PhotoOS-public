@@ -26,6 +26,7 @@ def _cli_argv(action: catalog.CliAction) -> list[str]:
     argv = catalog.resolve_argv(
         action,
         query="日出" if action.needs_query else None,
+        prompt="sunrise" if action.needs_prompt else None,
         library=1 if action.needs_library else None,
     )
     return argv[argv.index("photoos") + 1:]
@@ -42,6 +43,14 @@ def test_every_catalog_command_is_accepted_by_the_real_cli(action) -> None:
 def test_catalog_ids_are_unique() -> None:
     ids = [a.id for a in catalog.CATALOG]
     assert len(ids) == len(set(ids)), f"动作 id 重复：{ids}"
+
+
+def test_prompt_placeholder_only_in_needs_prompt_actions() -> None:
+    """`{prompt}` 与 `needs_prompt` 必须成对出现，避免界面收不到提示词。"""
+    for action in catalog.CATALOG:
+        has_placeholder = "{prompt}" in action.argv
+        assert has_placeholder == action.needs_prompt, (
+            f"{action.id}: {has_placeholder=} 但 {action.needs_prompt=}")
 
 
 def test_query_placeholder_only_in_needs_query_actions() -> None:

@@ -144,6 +144,9 @@ SKIP_DIR_NAMES = frozenset(
         ".git",
         "__pycache__",
         ".thumbnails",
+        # 手机相机/编辑器的临时目录：adb 会整树拉下来，但不是用户照片。
+        ".temp",
+        ".dolly_zoom",
     }
 )
 
@@ -253,7 +256,8 @@ class Settings(BaseSettings):
 
     # ---- 手机收件箱（P1：不做 MTP 直读，用户用资源管理器把文件复制进来）----
     #: 收件箱目录。用户/手机把文件复制到这里，PhotoOS 等文件稳定后再走既有分类导入。
-    #: **源文件只读**：导入是复制，不移动、不改名、不删除收件箱里的东西。
+    #: **源文件默认只读**：导入是复制，不移动、不改名；只有用户显式勾选
+    #: 「导入后清理」且目标可核对时，才会删掉收件箱里的副本。
     #: None = `%USERPROFILE%\Pictures\PhotoOS 收件箱`（见 `effective_inbox_path`）。
     inbox_path: Path | None = Field(
         default=None,
@@ -279,7 +283,12 @@ class Settings(BaseSettings):
     def _expand(cls, v: Any) -> Any:
         if v is None or isinstance(v, Path):
             return v
-        return Path(os.path.expandvars(os.path.expanduser(str(v))))
+        text = str(v).strip()
+        # 空字符串不能变成 Path('.')：`ai_python=""` 曾经因此让“未配置”看起来像
+        # 配了一个当前目录，安装日志还会报一个无关的路径。空值就是 None。
+        if not text:
+            return None
+        return Path(os.path.expandvars(os.path.expanduser(text)))
 
     @classmethod
     def settings_customise_sources(

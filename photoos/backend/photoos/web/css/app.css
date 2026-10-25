@@ -105,6 +105,7 @@ body {
   font-family: var(--font-ui);
   font-size: var(--fs-md);
   font-weight: 500;
+  white-space: nowrap;
   cursor: pointer;
   transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
 }
@@ -326,7 +327,24 @@ code {
 .library-card:hover { border-color: var(--royal-300); }
 /* 当前库：金色描边（"你正打开的是这一个"，不是"这个库更好"） */
 .library-card.is-active { border-color: var(--gold-a45); background: var(--gold-a05); }
-.library-card .name { font-weight: 600; font-size: var(--fs-base); display: flex; justify-content: space-between; gap: var(--sp-3); }
+.library-card .name {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  min-width: 0;
+  font-weight: 600;
+  font-size: var(--fs-base);
+}
+/* 名字只占一行，太长就省略；在线状态固定在右侧。
+ * 以前名字、状态、两个操作按钮挤在同一行，库名被压成两行，按钮互相贴着。 */
+.library-card .lib-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.library-card .badge { flex: 0 0 auto; }
 .library-card .path { color: var(--ink-text-3); font-family: var(--font-mono); font-size: var(--fs-2xs); word-break: break-all; margin-top: 3px; }
 .library-card .meta { color: var(--ink-text-3); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; margin-top: var(--sp-1); }
 
@@ -773,6 +791,41 @@ code {
   letter-spacing: 0.06em;
 }
 .card.is-missing { opacity: 0.55; }
+
+/* Shot 详情里的胶片条：折叠成一张卡后，组内每个文件仍要能点到。
+ * 横向滚动而不是换行，避免 JPG+RAW+视频 把侧栏推高。 */
+.shot-strip {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 2px 0 8px;
+  margin-bottom: 4px;
+}
+.shot-strip-item {
+  flex: 0 0 54px;
+  width: 54px;
+  height: 54px;
+  padding: 0;
+  border: 1px solid var(--ink-divider);
+  border-radius: var(--r-sm);
+  background: var(--ink-stage);
+  overflow: hidden;
+  cursor: pointer;
+  position: relative;
+}
+.shot-strip-item img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.shot-strip-item span {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  padding: 1px 3px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  line-height: 1.4;
+  color: var(--ink-text);
+  background: color-mix(in srgb, var(--ink-stage) 78%, transparent);
+  text-align: center;
+}
+.shot-strip-item.is-current { border-color: var(--gold-500); box-shadow: 0 0 0 1px var(--gold-500); }
 .card.is-missing::after {
   content: "文件缺失";
   position: absolute;
@@ -1185,6 +1238,20 @@ code {
 
 @media (max-width: 900px) {
   :root { --sidebar-w: 220px; }
+
+  /* 窄屏先让导航有地方：品牌副标题与连接状态是“有则更好”的信息，
+   * 七个页签是必需信息。保持单行，必要时让页签自己横向滚动。 */
+  .phase,
+  .statusline { display: none; }
+  .topbar { gap: var(--sp-3); }
+  .brand { flex: 0 0 auto; }
+  .tabs {
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab { flex: 0 0 auto; padding: 0 10px; }
 }
 
 
@@ -1202,6 +1269,11 @@ code {
   margin-bottom: 8px;
   overflow: hidden;
 }
+/* 导入面板是普通 .panel，紧跟着的收件箱是折叠组：保留与其他块一致的 14px 呼吸。
+ * 不写的话 .panel + .panel 的旧间距规则匹配不到 <details>，两块会贴在一起。 */
+#view-maintenance.view > .panel + .maint-group { margin-top: var(--flow); }
+/* 收起时「可导入 N 个」是唯一提示；有货时让它亮起来，别埋在灰字里。 */
+.maint-group.is-ready > summary em { color: var(--gold-500); }
 .maint-group > summary {
   display: flex;
   align-items: center;
@@ -1356,39 +1428,115 @@ code {
 
 /* 维护页：左目录 + 右内容。
  *
- * ⚠️ 这里**不用 grid**，用 float + margin：
- * grid 两列时，折叠组（<details>）作为网格项会被压成 ~89px、内容 overflow:hidden 裁掉
- *（实测：groupH=88.7 而 scrollHeight=2433，试过 align-items/align-content 都没救回来）。
- * 浮动 + 固定左边界是最笨但最稳的做法：目录浮在左，正文照常流式排版。
+ * ⚠️ 这一页**不是纵向 flex**：目录要浮在左边，正文按普通文档流排。
+ * 之前把目录放在 flex 子项里，float 根本不生效；再加上 `:not(.maint-toc)`
+ * 的左边距被 phase2 的通用 `margin-left: var(--gutter)` 覆盖，
+ * 目录就变成页顶一条竖排列表，把正文整体推到它下面（截图里维护页顶部那一大块）。
+ * 现在把这一页单独设为 block，并显式给正文让出与目录同宽的左边界。
  */
-/* 不在这里设 display：.view 的显隐由 .is-active 控制，覆盖它会串页 */
-#view-maintenance > .maint-toc {
-  float: left;
-  width: 180px;
-  margin: 0 24px 12px 0;
-  position: sticky;
-  top: 10px;
-  max-height: calc(100vh - 40px);
-  overflow: auto;
+#view-maintenance.view.is-active {
+  display: block;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
-#view-maintenance > :not(.maint-toc) { margin-left: 204px; }
+
+#view-maintenance.view.is-active > .maint-toc {
+  float: left;
+  width: 190px;
+  margin: 22px 28px 16px var(--gutter);
+  padding: 12px;
+  position: sticky;
+  top: var(--sp-4);
+  max-height: calc(100vh - var(--topbar-h) - 40px);
+  overflow: auto;
+  background: var(--ink-panel);
+  border: 1px solid var(--ink-divider);
+  border-radius: var(--r-md);
+}
+
+#view-maintenance.view > *:not(.maint-toc):not(.library-body) {
+  margin-left: calc(190px + 28px + var(--gutter));
+  margin-right: var(--gutter);
+}
+
 .maint-toc-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .maint-toc-list button {
   width: 100%; text-align: left; background: none; border: 1px solid transparent;
-  border-radius: var(--r-sm); padding: 6px 8px; cursor: pointer;
+  border-radius: var(--r-sm); padding: 7px 8px; cursor: pointer;
   color: var(--ink-text-2); font-family: var(--font-ui); font-size: 12.5px;
+  line-height: 1.45;
 }
-.maint-toc-list button:hover { background: var(--ink-panel-2); color: var(--ink-text); }
+.maint-toc-list button:hover,
+.maint-toc-list button:focus-visible {
+  background: var(--ink-panel-2); color: var(--ink-text);
+  outline: none; border-color: var(--ink-line);
+}
 .maint-toc-list button .n { color: var(--ink-text-3); font-variant-numeric: tabular-nums; margin-right: 6px; }
-.maint-toc-head { font-size: 11px; letter-spacing: .2em; color: var(--ink-text-3); padding: 0 8px 6px; }
+.maint-toc-head { font-size: 11px; letter-spacing: .2em; color: var(--ink-text-3); padding: 0 8px 8px; }
+
 @media (max-width: 1180px) {
-  #view-maintenance > .maint-toc { float: none; width: auto; margin: 0 0 12px; position: static; max-height: none; }
-  #view-maintenance > :not(.maint-toc) { margin-left: 0; }
-  .maint-toc-list { flex-direction: row; flex-wrap: wrap; }
+  #view-maintenance.view.is-active > .maint-toc {
+    float: none; width: auto; margin: 14px var(--gutter) 0;
+    position: static; max-height: none;
+  }
+  #view-maintenance.view > *:not(.maint-toc):not(.library-body) {
+    margin-left: var(--gutter);
+    margin-right: var(--gutter);
+  }
+  .maint-toc-list { flex-direction: row; flex-wrap: wrap; gap: 2px 4px; }
+  .maint-toc-list li { flex: 0 1 auto; }
+  .maint-toc-list button { width: auto; }
 }
-  #view-maintenance > .maint-toc { position: static; max-height: none; margin-bottom: 10px; }
-  .maint-toc-list { flex-direction: row; flex-wrap: wrap; }
+
+/* 折叠组里的次级折叠（目前用于「数据维护 → 全部命令」）。 */
+.maint-subgroup {
+  border: 1px solid var(--ink-divider);
+  border-radius: var(--r-sm);
+  background: var(--ink-panel-2);
+  overflow: hidden;
 }
+.maint-subgroup > summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  list-style: none;
+  cursor: pointer;
+  color: var(--ink-text-2);
+}
+.maint-subgroup > summary::-webkit-details-marker { display: none; }
+.maint-subgroup > summary:hover { background: rgba(123, 157, 219, 0.06); }
+.maint-subgroup > summary:focus-visible { outline: none; box-shadow: var(--focus-tight); }
+.maint-subgroup > summary span { display: flex; align-items: baseline; gap: 10px; min-width: 0; flex-wrap: wrap; }
+.maint-subgroup > summary b {
+  font-size: var(--fs-base);
+  color: var(--ink-text);
+  font-weight: 600;
+}
+.maint-subgroup > summary em {
+  font-style: normal;
+  font-size: var(--fs-sm);
+  color: var(--ink-text-3);
+}
+.maint-subgroup > summary::after {
+  content: '';
+  margin-left: auto;
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid var(--ink-text-3);
+  border-bottom: 1.5px solid var(--ink-text-3);
+  transform: rotate(45deg);
+  transition: transform var(--dur-fast) var(--ease);
+}
+.maint-subgroup[open] > summary { border-bottom: 1px solid var(--ink-divider); }
+.maint-subgroup[open] > summary::after { transform: rotate(-135deg); }
+.maint-subgroup .actions-panel {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+.maint-subgroup .act-row { background: var(--ink-panel); }
 
 /* AI 组件行内的进度条：pip/模型阶段拿不到真实百分比，用**不确定进度**动画，
    总比"只有一个『安装中…』按钮"强 —— 用户至少知道它在动。 */
@@ -1453,7 +1601,18 @@ code {
 .inline-confirm-actions { align-items: center; }
 
 /* 照片库卡片上的操作：默认是安静的灰字，悬停才亮；不再抢主视觉 */
-.library-actions { display: inline-flex; gap: 10px; margin-left: auto; align-items: center; }
+.library-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-top: 8px;
+  padding-top: 7px;
+  border-top: 1px solid var(--ink-divider);
+  opacity: 0.72;
+  transition: opacity var(--dur-fast) var(--ease);
+}
+.library-card:hover .library-actions,
+.library-card:focus-within .library-actions { opacity: 1; }
 .library-op {
   background: none; border: 0; padding: 2px 0; cursor: pointer;
   font: inherit; font-size: 12px; color: var(--ink-text-3);

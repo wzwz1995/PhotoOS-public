@@ -418,7 +418,7 @@ function detailHtml(detail) {
       </span>
       <span class="person-head-actions">
         <button class="btn small" data-act="rename">改名</button>
-        <button class="btn primary" data-act="collection">一键进专题</button>
+        <button class="btn primary" data-act="collection">加入主题</button>
         <button class="btn small" data-act="pack"
                 title="把这个人的原片打成一个 zip（复制到数据目录的 exports/，不动原片）">打包原片</button>
         ${person.name ? '' : `<button class="btn small" data-act="dissolve"
@@ -656,7 +656,7 @@ function emptyBoxHtml() {
           <strong>是他</strong>就点「是他」，<strong>不是</strong>就点「不是他」，
           确认几张之后点「改名」给他起个名字。
         </p>
-        <p class="hint tiny">命名之后，「一键进专题」就能把这些照片收进以他名字命名的主题里。</p>
+        <p class="hint tiny">命名之后，点「加入主题」就能把这些照片收进以他名字命名的主题里。</p>
       </div>`;
   }
   return '';
@@ -1006,7 +1006,7 @@ async function toCollection() {
       ? `已新建主题「${payload.name}」并放进 ${payload.added} 张（重复的自动跳过）`
       : `已放进主题「${payload.name}」${payload.added} 张（重复的自动跳过）`);
   } catch (error) {
-    toast(`放进专题失败：${error.message}`, true);
+    toast(`加入主题失败：${error.message}`, true);
   }
 }
 

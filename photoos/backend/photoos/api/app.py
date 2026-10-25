@@ -1529,6 +1529,118 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     #   **`serve` 不需要 onnxruntime/torch**，也不和 CLIP 抢显存。
     #   代价（必须如实告知界面）：只能搜"命令行预置过的词"。
 
+    @app.get("/api/semantic/manage")
+    async def semantic_manage(request: Request) -> dict[str, Any]:
+        """关键词工作台：覆盖统计 + 每个词的过期状态。
+
+        **只读**。真正的命中刷新是 `POST /api/semantic/refresh`；补图片向量走
+        现有 `embed_gemma` 动作（需要 AI venv），两者成本差一个数量级。
+        """
+        from ..library import semantic_admin
+
+        db: Database = request.app.state.db
+        return await _read(db, lambda: semantic_admin.manage_payload(db))
+
+    @app.post("/api/semantic/refresh")
+    async def semantic_refresh(request: Request, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """重算选中词（或全部词）的命中。**不需要 torch。**
+
+        只替换 `semantic_query_hit`；`semantic_feedback` / `semantic_tuning`
+        保持不动。选中的词必须属于同一个模型身份。
+        """
+        from ..library import semantic_admin
+
+        db: Database = request.app.state.db
+        body = payload or {}
+        raw = body.get("query_ids")
+        if raw is None:
+            ids = None
+        elif isinstance(raw, list):
+            try:
+                ids = [int(value) for value in raw]
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail="query_ids 必须是整数数组") from exc
+        else:
+            raise HTTPException(status_code=422, detail="query_ids 必须是整数数组")
+
+        def _run() -> dict[str, Any]:
+            try:
+                return semantic_admin.refresh_hits(db, ids)
+            except ValueError as exc:
+                return {"__error__": str(exc)}
+
+        result = await _read(db, _run)
+        if "__error__" in result:
+            raise HTTPException(status_code=400, detail=result["__error__"])
+        return result
+
+    @app.get("/api/semantic/scenes/{query_id}")
+    async def semantic_scene_status(request: Request, query_id: int) -> dict[str, Any]:
+        """一个关键词场景的当前覆盖状态（不推进挖掘轮次）。"""
+        from ..library import scene_mining
+
+        db: Database = request.app.state.db
+
+        def _run() -> dict[str, Any]:
+            try:
+                return scene_mining.scene_status(db, int(query_id))
+            except LookupError as exc:
+                return {"__missing__": str(exc)}
+            except ValueError as exc:
+                return {"__error__": str(exc)}
+
+        result = await _read(db, _run)
+        if "__missing__" in result:
+            raise HTTPException(status_code=404, detail=result["__missing__"])
+        if "__error__" in result:
+            raise HTTPException(status_code=400, detail=result["__error__"])
+        return result
+
+    @app.post("/api/semantic/scenes/{query_id}/discover")
+    async def semantic_scene_discover(
+        request: Request,
+        query_id: int,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """挖下一批 60 张；识别线变化写入 scene 状态。
+
+        人工标签仍走 `POST /api/semantic/feedback`（keep/drop）—— 标签是
+        场景的唯一真源，本接口只负责选下一批候选。
+        """
+        from ..library import scene_mining
+
+        db: Database = request.app.state.db
+        body = payload or {}
+        threshold: float | None = None
+        if body.get("threshold") is not None:
+            try:
+                threshold = float(body["threshold"])
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail="threshold 必须是数字") from exc
+            if not 0.0 <= threshold <= 1.0:
+                raise HTTPException(status_code=422, detail="threshold 必须在 0–1 之间")
+        try:
+            limit = int(body.get("limit") or scene_mining.BATCH_SIZE)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail="limit 必须是整数") from exc
+        limit = max(1, min(limit, scene_mining.BATCH_SIZE))
+
+        def _run() -> dict[str, Any]:
+            try:
+                return scene_mining.discover(
+                    db, int(query_id), threshold=threshold, limit=limit)
+            except LookupError as exc:
+                return {"__missing__": str(exc)}
+            except ValueError as exc:
+                return {"__error__": str(exc)}
+
+        result = await _read(db, _run)
+        if "__missing__" in result:
+            raise HTTPException(status_code=404, detail=result["__missing__"])
+        if "__error__" in result:
+            raise HTTPException(status_code=422, detail=result["__error__"])
+        return result
+
     @app.get("/api/semantic/queries")
     async def semantic_queries(request: Request) -> dict[str, Any]:
         """可搜索的词（界面下拉框的内容）。按凝聚度降序 —— 越靠前越"在库里真有内容"。"""
@@ -1538,8 +1650,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             from ..repos import SemanticRepo
 
             def _run():
+                from ..library.semantic_admin import TOP_HITS
+
                 items = SemanticRepo(db).list_queries()
-                return {"total": len(items), "items": items}
+                return {"total": len(items), "items": items, "top_hits": TOP_HITS}
 
             try:
                 return _run()
@@ -2929,8 +3043,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 return {"missing": True}
             rows = db.query(
                 # 列名是 `metadata.capture_at`（不是 `captured_at` —— 那个在 `shot` 上）
-                "SELECT a.id, a.relative_path, a.file_type, m.capture_at, m.subsec"
+                "SELECT a.id, a.relative_path, a.file_type, m.capture_at, m.subsec,"
+                "       CASE WHEN r.asset_id IS NULL THEN 0 ELSE 1 END AS rejected"
                 "  FROM asset a LEFT JOIN metadata m ON m.asset_id = a.id"
+                "  LEFT JOIN asset_reject r ON r.asset_id = a.id"
                 " WHERE a.shot_id = ?"
                 " ORDER BY COALESCE(m.capture_at, '9999'), COALESCE(m.subsec, ''), a.id",
                 (int(shot_id),),
@@ -2946,6 +3062,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         "relative_path": r["relative_path"],
                         "file_type": r["file_type"],
                         "captured_at": r["capture_at"],
+                        "rejected": bool(r["rejected"]),
                     }
                     for r in rows
                 ],
@@ -2954,6 +3071,40 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         result = await _read(db, _list_assets)
         if result.get("missing"):
             raise HTTPException(status_code=404, detail="Shot 不存在")
+        return result
+
+    @app.post("/api/shots/{shot_id}/reject")
+    async def shot_reject(
+        request: Request, shot_id: int, payload: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """把一组文件当作**一次判断**标记/取消废片。
+
+        照片墙折叠后一张卡就是一个 Shot；如果仍要求用户逐个文件点，折叠只省了视觉、
+        没省操作。这个端点只写 `asset_reject`，不动任何原片；清理仍走统一回收站流程。
+        """
+        from ..library import rejects as rejects_mod
+
+        db: Database = request.app.state.db
+        body = payload or {}
+        marked = bool(body.get("marked", True))
+        note = str(body.get("note") or "").strip() or None
+
+        def run() -> dict[str, Any]:
+            rows = db.query(
+                "SELECT a.id FROM asset a JOIN shot s ON s.id = a.shot_id"
+                " WHERE a.shot_id = ? AND s.retired_at IS NULL ORDER BY a.id",
+                (int(shot_id),),
+            )
+            if not rows:
+                return {"missing": True}
+            ids = [int(row["id"]) for row in rows]
+            for asset_id in ids:
+                rejects_mod.mark(db, asset_id, marked=marked, note=note)
+            return {"shot_id": int(shot_id), "marked": marked, "count": len(ids)}
+
+        result = await _read(db, run)
+        if result.get("missing"):
+            raise HTTPException(status_code=404, detail="Shot 不存在或没有可标记的文件")
         return result
 
     @app.get("/api/assets/{asset_id}")
@@ -3295,9 +3446,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         """
         settings: Settings = request.app.state.settings
         payload = actions_catalog.catalog_payload(settings)
-        python, _ = actions_catalog.interpreter(settings)
         for item in payload["actions"]:
             action = actions_catalog.BY_ID[item["id"]]
+            python = item.get("python") or payload["environment"]["python"]
             item["command_preview"] = actions_catalog.describe_command(
                 python, [*action.argv]
             )
@@ -3307,9 +3458,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def run_action(request: Request, action_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """把一条白名单命令排进后台任务队列。
 
-        **安全边界**：请求体里只有 `query`（搜索词）会被读取，且只对
-        `needs_query` 的动作有效、还要过字符白名单。命令本身、参数顺序、
-        用哪个解释器，全部由服务端决定 —— 这里没有"把用户输入拼进命令行"的路径。
+        **安全边界**：请求体里只有 `query`（搜索词）和 `prompt`（实际提示词）
+        会被读取，且只对声明了 `needs_query` / `needs_prompt` 的动作有效、
+        还要过各自的字符白名单。命令本身、参数顺序、用哪个解释器，全部由
+        服务端决定 —— 这里没有"把用户输入拼进命令行"的路径。
         """
         db: Database = request.app.state.db
         settings: Settings = request.app.state.settings
@@ -3323,6 +3475,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
 
         query: str | None = None
+        prompt: str | None = None
         library: int | None = None
         if action.needs_library:
             raw = body.get("library")
@@ -3338,10 +3491,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 query = actions_catalog.validate_query(body.get("query"))
             except ValueError as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if action.needs_prompt:
+            try:
+                prompt = actions_catalog.validate_prompt(body.get("prompt"))
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
 
         python, reason = actions_catalog.interpreter(settings, action)
         try:
-            argv = actions_catalog.resolve_argv(action, query=query, library=library)
+            argv = actions_catalog.resolve_argv(
+                action, query=query, prompt=prompt, library=library)
         except ValueError as exc:  # pragma: no cover - 目录自身写错才会到这里
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         command = actions_catalog.describe_command(python, argv)
@@ -3680,7 +3839,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         """把收件箱里**已经复制完成**的文件导入照片库（后台任务）。
 
         与 `/api/import/apply` 的区别只有一个：执行范围不是"源目录里的全部文件"，
-        而是入队那一刻由两次扫描确认稳定的那些。源文件始终只读。
+        而是入队那一刻由两次扫描确认稳定的那些。默认源文件只读；
+        `cleanup_after_import=true` 时，任务成功后会删除**台账可核对、目标仍在库里**的
+        收件箱副本（手机与照片库里的文件不动）。
         """
         from ..library import inbox as inbox_mod
         from ..library import paths as paths_mod
@@ -3744,6 +3905,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     relative: [int(size), int(mtime_ns)]
                     for relative, (size, mtime_ns) in ready.items()
                 },
+                # 显式勾选才清理；默认保留（兼容旧客户端与"只读"默认承诺）。
+                "cleanup_after_import": bool(payload.get("cleanup_after_import")),
             }
             return {
                 "job": _job_dict(
@@ -3754,6 +3917,41 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "ready": len(ready),
                 "bytes": snapshot.ready_bytes,
                 "path": str(snapshot.path),
+            }
+
+        return await _read(db, run)
+
+    @app.post("/api/inbox/cleanup")
+    async def inbox_cleanup(request: Request, payload: dict[str, Any]) -> dict[str, Any]:
+        """手动清理已经安全入库的收件箱副本（只删可核对、目标仍在库里的文件）。
+
+        与 `/api/inbox/import` 的 `cleanup_after_import` 同一套底层逻辑；单独暴露是因为
+        "导入当时没勾选"或"旧版本已经导入完"的用户也需要一个入口。仍要求显式 confirmed。
+        """
+        from ..library import inbox as inbox_mod
+        from ..library.store import LibraryStore
+
+        db: Database = request.app.state.db
+        settings_obj: Settings = request.app.state.settings
+        if not payload.get("confirmed"):
+            raise HTTPException(
+                status_code=428,
+                detail="清理会删除收件箱里已入库的副本，必须先确认（confirmed=true）。",
+            )
+
+        def run() -> dict[str, Any]:
+            roots = {
+                library.id: library.root_path
+                for library in LibraryStore(db).list_all()
+                if library.root_path is not None
+            }
+            result = inbox_mod.cleanup_imported(settings_obj, library_roots=roots)
+            return {
+                "deleted": result.deleted,
+                "bytes": result.bytes,
+                "kept": result.kept,
+                "errors": result.errors[:20],
+                "summary": result.summary,
             }
 
         return await _read(db, run)
@@ -3880,6 +4078,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "staging": str(staging),
                 "label": device.model or device.serial,
                 "since": since,
+                # 进度按字节计：UI 会把它显示成 8.2 GB / 52.4 GB，而不是裸数字。
+                "progress_unit": "bytes",
             }
             libraries = LibraryStore(db).list_all()
             job = JobQueue(db).create(
@@ -4188,7 +4388,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 return path
         return None
 
-    def _run_install(component_id: str, data_root: Path, mirrors: dict[str, str]) -> None:
+    def _run_install(component_id: str, data_root: Path, mirrors: dict[str, str],
+                     settings_obj: Settings) -> None:
         state = ai_state.setdefault(component_id, {"state": "running", "log": []})
         state.update({"state": "running", "log": []})
 
@@ -4208,6 +4409,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     f"{component.label} 需要外挂环境（torch），不提供一键安装；"
                     "请按技术文档「AI 组件」一节手动安装")
             if component.kind == "venv":
+                if component.id == "torch-cuda":
+                    # 只换 AI venv 的 torch/torchvision，不重建环境、不动模型。
+                    venv_target = ai_install.ai_venv_dir()
+                    venv_python = venv_target / "Scripts" / "python.exe"
+                    if not venv_python.is_file():
+                        raise ai_install.InstallError(
+                            "先安装「中文语义搜索（EmbeddingGemma）」组件，再装 CUDA 加速")
+                    ai_install.install_into_venv(
+                        venv_python,
+                        ["torch==2.14.1+cu130", "torchvision==0.29.1+cu130"],
+                        index_url="https://download.pytorch.org/whl/cu130", log=log)
+                    import subprocess as _subprocess
+                    flags = getattr(_subprocess, "CREATE_NO_WINDOW", 0)
+                    probe = _subprocess.run(
+                        [str(venv_python), "-c",
+                         "import torch; print(torch.__version__, torch.version.cuda);"
+                         " raise SystemExit(0 if torch.cuda.is_available() else 1)"],
+                        capture_output=True, text=True, timeout=90, creationflags=flags,
+                    )
+                    if probe.returncode != 0:
+                        raise ai_install.InstallError(
+                            "CUDA torch 已安装，但 torch.cuda.is_available() 仍为 False："
+                            + (probe.stderr or probe.stdout or "")[-300:])
+                    log(f"CUDA 可用：{probe.stdout.strip()}")
+                    from ..config import save_settings_overrides
+                    save_settings_overrides(settings_obj, {"ai_python": str(venv_python)})
+                    state["state"] = "done"
+                    return
                 # 中文语义搜索：独立 venv + torch + 模型。体积大，但失败只需删目录。
                 venv_target = ai_install.ai_venv_dir()
                 venv_python = ai_install.ensure_ai_venv(venv_target, log=log)
@@ -4357,6 +4586,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
                 _shutil.rmtree(directory, ignore_errors=True)
                 removed.append(directory.name)
+        if component_id == "torch-cuda":
+            # 不删 AI venv（里面有 gemma），只把 torch/torchvision 换回 CPU 版。
+            venv_python = ai_install.ai_venv_dir() / "Scripts" / "python.exe"
+            if venv_python.is_file():
+                try:
+                    from .. import ai_mirrors
+
+                    ai_install.install_into_venv(
+                        venv_python, ["torch==2.14.1", "torchvision==0.29.1"],
+                        index_url=ai_mirrors.current()["pip_index_url"])
+                    removed.append("CUDA torch → CPU torch")
+                except Exception:  # noqa: BLE001
+                    pass
         if component_id == "gemma-text":
             import shutil as _shutil
 
@@ -4411,10 +4653,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         current_state = ai_state.get(component_id) or {}
         if current_state.get("state") == "running":
             raise HTTPException(status_code=409, detail="这个组件正在安装")
-        data_root = request.app.state.settings.data_root
+        settings_obj: Settings = request.app.state.settings
+        data_root = settings_obj.data_root
         mirrors = ai_mirrors.current()
         ai_state[component_id] = {"state": "running", "log": []}
-        asyncio.create_task(asyncio.to_thread(_run_install, component_id, data_root, mirrors))
+        asyncio.create_task(asyncio.to_thread(
+            _run_install, component_id, data_root, mirrors, settings_obj))
         return {"started": component_id}
 
     # ------------------------------------------------------------ 数据根（设置）
@@ -4850,6 +5094,8 @@ def _job_dict(record) -> dict[str, Any]:
         "retry_count": record.retry_count,
         "max_retries": record.max_retries,
         "library_id": scope.get("library_id"),
+        # `bytes` 时前端用 humanBytes 显示；为空/其它值按普通计数显示。
+        "progress_unit": scope.get("progress_unit"),
         # 界面直跑的命令：任务卡片要能显示"到底跑了什么"，否则用户没法复核。
         # 只对外暴露这三项 —— scope 里可能还有别的东西（例如 export 的 asset_ids）。
         "action_id": scope.get("action_id"),

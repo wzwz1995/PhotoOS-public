@@ -328,10 +328,13 @@ def _assess(group: Sequence[ShotAsset]) -> tuple[float, list[str]]:
         notes.append("组内曝光变过（连拍中途自动曝光属正常现象）")
         return CONFIDENCE_EXPOSURE_VARIED, notes
 
-    # 序号连续才给最高置信度
-    prefixes = {p for p, _ in seqs if p is not None}
-    numbers = [n for _p, n in seqs if _p is not None]
-    complete = len(numbers) == len(seqs) and len(prefixes) == 1
+    # 序号连续才给最高置信度。`_sequence_number()` 对没有数字的文件名返回 None，
+    # 不能直接解包 —— 2026-10-21 的真机导入里有 6,586 张手机照片（含中文名、
+    # `DOCUMENT_PICTURE` 等），整批 regroup 就是在这一行 `TypeError` 崩掉的。
+    parsed = [seq for seq in seqs if seq is not None]
+    prefixes = {p for p, _ in parsed}
+    numbers = [n for _p, n in parsed]
+    complete = len(parsed) == len(seqs) and len(prefixes) == 1
     contiguous = False
     if complete:
         ordered = sorted(numbers)

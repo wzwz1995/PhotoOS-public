@@ -405,12 +405,20 @@ def test_adb_pull_job_publishes_into_inbox(client: TestClient) -> None:
     payload = client.post("/api/adb/pull", json={"confirmed": True}).json()
     staging = Path(payload["staging"])
     assert staging.is_dir()
+    assert payload["job"]["progress_unit"] == "bytes"
 
     queue = JobQueue(client.db)  # type: ignore[attr-defined]
     record = queue.claim_next()
     assert record is not None and record.id == payload["job"]["id"]
     report = JobRunner(client.db, settings).run(record)  # type: ignore[attr-defined]
     assert report.status == "COMPLETED", report.error
+
+    # 3 个假文件的字节数：1024 + 2048 + 4096。进度必须按字节落地，
+    # 不能像真实拉取那样一直是 0/0（前台就没有进度条）。
+    finished = queue.get(payload["job"]["id"])
+    assert finished.progress_total == 7168
+    assert finished.progress_done == 7168
+    assert "手机目录" in report.stages
 
     assert not staging.exists(), "发布后暂存区应当已移走"
     pulled = list((settings.effective_inbox_path / "ADB").rglob("*.JPG"))

@@ -95,6 +95,24 @@ def test_action_needing_query_rejects_missing_query(client: TestClient) -> None:
     assert response.status_code == 422, response.text
 
 
+def test_action_needing_prompt_rejects_missing_or_unsafe_prompt(client: TestClient) -> None:
+    """改词义动作：query 合法但 prompt 缺失/带命令行元字符 → 422。"""
+    actions = {
+        item["id"]: item for item in client.get("/api/actions").json()["actions"]
+    }
+    needs_prompt = [aid for aid, item in actions.items() if item.get("needs_prompt")]
+    assert needs_prompt, "目录里应当至少有一个需要 prompt 的动作"
+    action_id = needs_prompt[0]
+
+    missing = client.post(f"/api/actions/{action_id}/run", json={"query": "月亮"})
+    assert missing.status_code == 422
+    unsafe = client.post(
+        f"/api/actions/{action_id}/run",
+        json={"query": "月亮", "prompt": "moon; rm -rf /"},
+    )
+    assert unsafe.status_code == 422
+
+
 def test_action_query_rejects_shell_metacharacters(client: TestClient) -> None:
     """★ `query` 是**唯一**能进入命令行的用户输入，元字符必须被白名单挡住。
 

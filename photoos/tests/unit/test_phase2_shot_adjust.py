@@ -181,6 +181,25 @@ def test_split_rejects_retired_shot(env) -> None:
     assert response.status_code == 409
 
 
+# ============================================================ 整组废片标记
+
+def test_shot_reject_marks_every_file_and_can_undo(env) -> None:
+    """照片墙一张卡 = 一个 Shot；一次判断必须把同组 3 个文件一起标记。"""
+    db = env.db
+    body = env.post("/api/shots/1/reject", json={"marked": True}).json()
+    assert body["marked"] is True
+    assert body["count"] == 3
+    marked = {
+        int(r["asset_id"])
+        for r in db.query("SELECT asset_id FROM asset_reject ORDER BY asset_id")
+    }
+    assert marked == {1, 10, 11}
+
+    body = env.post("/api/shots/1/reject", json={"marked": False}).json()
+    assert body["marked"] is False
+    assert db.query("SELECT asset_id FROM asset_reject") == []
+
+
 # ============================================================ 合并
 
 def test_merge_moves_assets_and_retires_losers(env) -> None:
