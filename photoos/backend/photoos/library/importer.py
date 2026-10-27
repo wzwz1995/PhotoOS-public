@@ -9,7 +9,7 @@
   * 支持"仅校验不写入"的预演（`apply=False`），让用户先看清会做什么。
 
 与既有 PowerShell 工具的关系：接管其 `import-from-camera.ps1` 的**暂存目录**部分
-（`E:\\Staging\\<时间戳>\\`），MTP 设备直读尚未实现，属已知限制。
+（`C:\\Staging\\<时间戳>\\`），MTP 设备直读尚未实现，属已知限制。
 """
 
 from __future__ import annotations
