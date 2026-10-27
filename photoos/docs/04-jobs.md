@@ -118,7 +118,7 @@ PENDING ──claim──> PROCESSING ──┬──> COMPLETED   （终态）
 有测试逐项对账：`test_every_job_type_has_a_handler`。
 
 `migrate` 的 `action="import"` **故意拒绝**：它要替换整个数据根，
-不能在服务运行时做（见 [`09-changelog.md`](09-changelog.md)）。
+不能在服务运行时做。
 
 ### `regroup` —— 派生分组（2026-10 新增）
 

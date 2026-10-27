@@ -20,8 +20,6 @@
 | 碰 AI / 向量 / 人脸 | [`05-ai.md`](05-ai.md) |
 | 出问题了 | [`07-runbook.md`](07-runbook.md) 的排障一节 |
 | 想知道"为什么是这样" | [`08-decisions.md`](08-decisions.md) |
-| 想知道最近改了什么 | [`09-changelog.md`](09-changelog.md) |
-| 🧠 记忆不工作了 / 想改 AI 助手记忆的配置 | [`14-hindsight-memory.md`](14-hindsight-memory.md) |
 
 ---
 
@@ -37,21 +35,17 @@
 | [`06-frontend.md`](06-frontend.md) | 前端：零构建结构、设计令牌、组件契约、页面骨架、三个布局陷阱 |
 | [`07-runbook.md`](07-runbook.md) | 运行手册：常用命令、验证手段、排障（按症状查） |
 | [`08-decisions.md`](08-decisions.md) | 关键决策与踩过的坑：为什么这样、不能改成什么样 |
-| [`09-changelog.md`](09-changelog.md) | 变更记录：新增能力、行为变化、修掉的缺陷、**仍然存在的缺口** |
 | [`10-import-audit.md`](10-import-audit.md) | 照片导入的增量行为审计：去重已实测正确，但**导入后不会自动分组**（精选/找照片因此是空的） |
-| [`11-shell-unification.md`](11-shell-unification.md) | 统一外壳（方案 A）**实施方案**：四个视角共用一个外壳、抽三样东西、六步落地、验收判据 |
-| [`12-multidim-filter-plan.md`](12-multidim-filter-plan.md) | **多维筛选重构执行计划**：照片库做成主筛选台（内容×元数据×人物）、筛选上顶栏、弹窗渐进式标签、精选页由粗到细 |
-| [`13-raw-orientation.md`](13-raw-orientation.md) | **RAW 预览方向反了**（3,861 张）：LibRaw `sizes.flip` 被用在了内嵌预览上。实测 CLIP 不受影响、**SFace 完全失效**。修复步骤待 `E:` 盘上线 |
-| [`14-hindsight-memory.md`](14-hindsight-memory.md) | **AI 助手的本地长期记忆**：Hindsight 插件从 cloud 改走本机 daemon（`127.0.0.1:9077`）；内嵌 PostgreSQL + 本地嵌入/重排模型 + DeepSeek 抽取，含开机自启、验证手段与六个网络坑 |
+| [`13-raw-orientation.md`](13-raw-orientation.md) | **RAW 预览方向反了**（3,861 张）：LibRaw `sizes.flip` 被用在了内嵌预览上。实测 CLIP 不受影响、**SFace 完全失效**。修复步骤待外置盘上线 |
 
 ---
 
 ## ⭐ 完整技术参考（`20-reference/`）
 
-上面那 14 篇是"够用就好"的接手笔记；**要完整正规的技术参考、要看架构图与 ER 图，
+上面那 10 篇是"够用就好"的接手笔记；**要完整正规的技术参考、要看架构图与 ER 图，
 去 [`20-reference/`](20-reference/README.md)** —— 含架构总览、数据建模（31 张表 + ER 图）、
 后端模块地图、HTTP/CLI 接口参考、任务引擎、媒体流水线与 AI 子系统、前端架构、
-安全边界，以及**需要人拍板的 35 条问题**清单。
+安全边界。
 
 > 【实测】`20-reference/` 建于 2026-10-17。它与本目录的关系：
 > **它是在代码里逐行取证后写的**，本目录的部分行数基线（尤其 `03-data-model.md`）

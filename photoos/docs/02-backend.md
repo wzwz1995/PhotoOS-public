@@ -158,7 +158,7 @@ FastAPI，**纯本地服务**：默认只监听 `127.0.0.1`，没有鉴权且有
    都已实现，并有 `test_every_job_type_has_a_handler` 逐项对账。
    唯一的例外是 `migrate` 的 `action="import"`：它要**替换整个数据根**，
    不能在服务运行时执行，所以显式报错并把用户引到停机后的 CLI。
-   见 [`09-changelog.md`](09-changelog.md) 第二轮。
+   见 git 提交历史。
 
 2. **`--measure` 与 help 页的三个限宽**：现在按角色令牌化为
    `--measure`（容器）/ `--measure-prose` / `--measure-list` / `--measure-code`。

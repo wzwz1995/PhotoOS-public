@@ -341,7 +341,7 @@ help.css     说明
 - [ ] 表单里"标签在上"的字段**没有和"标签在左"的混在同一排**（会让控件高低差 8px）
 - [ ] 在 430px 与 1600px 两个宽度都看过
 - [ ] 跑 `pytest tests/unit/test_design_system.py`
-- [ ] 量排版的话跑 `_probe/filter_layout.py` 与 `_probe/maintenance_layout.py`
+- [ ] 量排版的话跑开发机上的排版测量脚本（`filter_layout.py` / `maintenance_layout.py`，未随仓库发布）
 
 ---
 

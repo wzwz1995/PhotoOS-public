@@ -1,4 +1,4 @@
-﻿# import-from-camera.ps1 - copy photos/videos off a camera or phone (MTP/PTP device)
+# import-from-camera.ps1 - copy photos/videos off a camera or phone (MTP/PTP device)
 #
 # A device connected in MTP mode has no drive letter: "此电脑\Z 5\可移动存储 10001\DCIM\101NCZ_5"
 # is a shell namespace path, so Test-Path / Get-ChildItem cannot touch it. This
