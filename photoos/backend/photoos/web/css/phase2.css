@@ -1334,7 +1334,9 @@ kbd {
   display: flex;
   gap: 10px;
   align-items: center;
-  width: 100%;
+  /* 主题树缩进：子主题按层级往右缩。`--tree-indent` 由 collections.js 按深度写入。 */
+  width: calc(100% - var(--tree-indent, 0px));
+  margin-left: var(--tree-indent, 0px);
   padding: 8px;
   border: 1px solid var(--ink-divider);
   border-radius: var(--r-md);
@@ -1374,6 +1376,55 @@ kbd {
 .collection-sub { font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-text-3); }
 .collections-detail { min-width: 0; }
 .collections-detail .hint { font-size: 13.5px; line-height: 1.7; }
+
+/* 上级主题：一行小的归属控件（下拉 + 回到上级）。 */
+.collection-parent-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--ink-text-2);
+}
+.collection-parent-row label { display: flex; align-items: center; gap: 8px; }
+.collection-parent-row select { min-height: var(--control-h, 38px); }
+
+/* 子主题「统合目录」：父主题详情里只展示封面、可点开。 */
+.collection-children { margin-top: 14px; }
+.collection-children-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.collection-children-head h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-text);
+}
+.collection-children-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+}
+.collection-child-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--ink-divider);
+  border-radius: var(--r-md);
+  background: var(--ink-panel-2);
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  transition: border-color 0.16s, transform 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.collection-child-card:hover { transform: translateY(-1px); border-color: var(--royal-300); }
+.collection-child-card .collection-cover { width: 100%; height: auto; aspect-ratio: 4 / 3; }
+.collection-child-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+
 .collection-items { margin-top: 12px; }
 /* 成员排成**缩略图网格**。改之前是一行行 46×46 的小图 + 文字 ——
    一个主题 63 张时那一列小图没法浏览（用户报的"可读性太差"）。

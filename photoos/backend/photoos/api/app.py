@@ -2051,6 +2051,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if row is None:
                 return {"missing": True}
             items = repo.items(collection_id)
+            children = []
+            for child in repo.children(collection_id):
+                cover = child.pop("effective_cover_shot_id", None)
+                children.append({
+                    "id": child["id"],
+                    "name": child["name"],
+                    "description": child["description"],
+                    "items": child["items"],
+                    "cover_asset_id": _cover_asset_id(db, cover),
+                })
             return {
                 "missing": False,
                 "id": int(row["id"]),
@@ -2059,10 +2069,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "description": row["description"],
                 "cover_shot_id": row["cover_shot_id"],
                 "sort_order": int(row["sort_order"]),
+                "parent_id": None if row["parent_id"] is None else int(row["parent_id"]),
                 "created_at": row["created_at"],
                 "updated_at": row["updated_at"],
                 "count": len(items),
                 "items": items,
+                "children": children,
                 "scenes": len(repo.audit_scene_ids(collection_id)),
                 "source": load_source(row["source_json"]),
             }
@@ -2094,6 +2106,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     uuid=payload.get("uuid"),
                     source=payload.get("source") if isinstance(payload.get("source"), dict)
                     else None,
+                    parent_id=payload.get("parent_id"),
                 )
             except ValueError as exc:
                 return {"bad_request": str(exc)}
@@ -2128,6 +2141,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     cover_shot_id=payload.get("cover_shot_id"),
                     clear_cover=bool(payload.get("clear_cover")),
                     sort_order=payload.get("sort_order"),
+                    parent_id=payload.get("parent_id"),
+                    clear_parent=bool(payload.get("clear_parent")),
                 )
             except ValueError as exc:
                 return {"bad_request": str(exc)}

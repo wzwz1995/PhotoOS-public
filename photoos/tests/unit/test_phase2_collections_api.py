@@ -283,3 +283,65 @@ def test_collection_endpoints_do_not_touch_files(client: TestClient, monkeypatch
     client.delete(f"/api/collections/{cid}?confirm=true")
 
     assert calls == [], f"Collections 端点产生了文件改动操作：{calls}"
+
+
+# ============================================================ 上下级关系（012）
+
+def test_create_with_parent_and_detail_children(client: TestClient) -> None:
+    parent = client.post("/api/collections", json={"name": "世界树之巅"}).json()["id"]
+    child = client.post("/api/collections", json={"name": "奥尔梅克", "parent_id": parent}).json()["id"]
+    client.post(f"/api/collections/{child}/items", json={"shot_ids": [1]})
+
+    detail = client.get(f"/api/collections/{parent}").json()
+    assert detail["parent_id"] is None
+    assert [c["name"] for c in detail["children"]] == ["奥尔梅克"]
+    assert detail["children"][0]["items"] == 1
+    assert detail["children"][0]["cover_asset_id"] == 1  # 子主题封面回退到首条
+
+    child_detail = client.get(f"/api/collections/{child}").json()
+    assert child_detail["parent_id"] == parent
+    assert child_detail["children"] == []
+
+
+def test_list_includes_parent_id(client: TestClient) -> None:
+    parent = client.post("/api/collections", json={"name": "世界树之巅"}).json()["id"]
+    client.post("/api/collections", json={"name": "奥尔梅克", "parent_id": parent})
+    items = client.get("/api/collections").json()["items"]
+    by_name = {i["name"]: i for i in items}
+    assert by_name["世界树之巅"]["parent_id"] is None
+    assert by_name["奥尔梅克"]["parent_id"] == parent
+
+
+def test_patch_parent_and_clear(client: TestClient) -> None:
+    parent = client.post("/api/collections", json={"name": "世界树之巅"}).json()["id"]
+    child = client.post("/api/collections", json={"name": "奥尔梅克"}).json()["id"]
+    assert client.patch(f"/api/collections/{child}", json={"parent_id": parent}).status_code == 200
+    assert client.get(f"/api/collections/{child}").json()["parent_id"] == parent
+    assert client.patch(f"/api/collections/{child}", json={"clear_parent": True}).status_code == 200
+    assert client.get(f"/api/collections/{child}").json()["parent_id"] is None
+
+
+def test_cycle_is_rejected_with_422(client: TestClient) -> None:
+    """防环：把父主题挂到它自己的子主题下必须被服务端拒绝。"""
+    parent = client.post("/api/collections", json={"name": "世界树之巅"}).json()["id"]
+    child = client.post("/api/collections", json={"name": "奥尔梅克", "parent_id": parent}).json()["id"]
+    response = client.patch(f"/api/collections/{parent}", json={"parent_id": child})
+    assert response.status_code == 422
+
+
+def test_missing_parent_is_rejected_with_422(client: TestClient) -> None:
+    response = client.post("/api/collections", json={"name": "孤儿", "parent_id": 999})
+    assert response.status_code == 422
+
+
+def test_browse_axis_is_hierarchical(client: TestClient) -> None:
+    """浏览轴的「主题」也按上下级分层：顶层只列父主题，点进去才是子主题。"""
+    parent = client.post("/api/collections", json={"name": "世界树之巅"}).json()["id"]
+    client.post("/api/collections", json={"name": "奥尔梅克", "parent_id": parent})
+    top = client.get("/api/browse/tree", params={"axis": "collection"}).json()
+    assert [n["label"] for n in top["nodes"]] == ["世界树之巅"]
+    assert top["nodes"][0]["has_children"] is True
+
+    children = client.get("/api/browse/tree", params={"axis": "collection", "parent": str(parent)}).json()
+    assert [n["label"] for n in children["nodes"]] == ["奥尔梅克"]
+    assert children["nodes"][0]["has_children"] is False

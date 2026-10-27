@@ -23,6 +23,33 @@ const state = {
 };
 
 // --------------------------------------------------------------------- 渲染
+function cardHtml(item, depth) {
+  return `
+    <button class="collection-card ${item.id === state.activeId ? 'is-active' : ''}"
+            data-collection="${item.id}" style="--tree-indent: ${depth * 16}px">
+      <span class="collection-cover">${
+        item.cover_asset_id
+          ? `<img ${assetImgAttrs({ assetId: item.cover_asset_id })}>`
+          : '<span class="collection-cover-empty">无封面</span>'
+      }</span>
+      <span class="collection-meta">
+        <span class="collection-name">${escapeHtml(item.name)}</span>
+        <span class="collection-sub">${item.items} 张${
+          item.children ? ` · ${item.children} 个子主题` : ''}${
+          item.description ? ' · ' + escapeHtml(item.description) : ''}</span>
+      </span>
+    </button>`;
+}
+
+/** 递归渲染主题树：顶层 → 子主题 → 孙主题，按 `parent_id` 嵌套。 */
+function renderLevel(items, depth) {
+  return items.map((item) => {
+    const children = state.items.filter((child) => child.parent_id === item.id);
+    return cardHtml(item, depth)
+      + (children.length ? renderLevel(children, depth + 1) : '');
+  }).join('');
+}
+
 function renderList() {
   const node = $('#collections-list');
   if (!node) return;
@@ -31,19 +58,8 @@ function renderList() {
       + '「蓝调时刻」「西北游记」这类跨时间、跨地点的合集就建在这里。</div>';
     return;
   }
-  node.innerHTML = state.items.map((item) => `
-    <button class="collection-card ${item.id === state.activeId ? 'is-active' : ''}"
-            data-collection="${item.id}">
-      <span class="collection-cover">${
-        item.cover_asset_id
-          ? `<img ${assetImgAttrs({ assetId: item.cover_asset_id })}>`
-          : '<span class="collection-cover-empty">无封面</span>'
-      }</span>
-      <span class="collection-meta">
-        <span class="collection-name">${escapeHtml(item.name)}</span>
-        <span class="collection-sub">${item.items} 张${item.description ? ' · ' + escapeHtml(item.description) : ''}</span>
-      </span>
-    </button>`).join('');
+  const topLevel = state.items.filter((item) => item.parent_id == null);
+  node.innerHTML = renderLevel(topLevel, 0);
 }
 
 function renderDetail() {
@@ -86,6 +102,29 @@ function renderDetail() {
       </div>
     </figure>`).join('');
 
+  const children = detail.children || [];
+  const childrenHtml = children.length
+    ? `<div class="collection-children-grid">${children.map((child) => `
+        <button class="collection-child-card" data-collection="${child.id}">
+          <span class="collection-cover">${
+            child.cover_asset_id
+              ? `<img ${assetImgAttrs({ assetId: child.cover_asset_id })}>`
+              : '<span class="collection-cover-empty">无封面</span>'
+          }</span>
+          <span class="collection-child-meta">
+            <span class="collection-name">${escapeHtml(child.name)}</span>
+            <span class="collection-sub">${child.items} 张</span>
+          </span>
+        </button>`).join('')}</div>`
+    : '<div class="hint tiny">还没有子主题。点「+ 新建子主题」在这里建立一个下级主题，'
+      + '比如「世界树之巅」下分「奥尔梅克」「阿兹特克」。</div>';
+
+  const parentOptions = state.items
+    .filter((item) => item.id !== detail.id && !descendantIdsOf(detail.id).includes(item.id))
+    .map((item) => `
+      <option value="${item.id}" ${item.id === detail.parent_id ? 'selected' : ''}>
+        ${escapeHtml(item.name)}</option>`).join('');
+
   node.innerHTML = `
     <div class="panel-head">
       <h2>${escapeHtml(detail.name)}</h2>
@@ -106,6 +145,23 @@ function renderDetail() {
       主题与物理目录<strong>完全无关</strong>：加入或移出只改数据库关系，
       <strong>不会移动、复制或删除任何照片文件</strong>。
     </p>
+    <div class="collection-parent-row">
+      <label>上级主题
+        <select id="collection-parent">
+          <option value="" ${detail.parent_id == null ? 'selected' : ''}>（顶层，无上级）</option>
+          ${parentOptions}
+        </select>
+      </label>
+      ${detail.parent_id != null
+        ? `<button class="btn ghost small" id="collection-go-parent">回到上级</button>` : ''}
+    </div>
+    <div class="collection-children">
+      <div class="collection-children-head">
+        <h3>子主题</h3>
+        <button class="btn small" id="collection-new-child">+ 新建子主题</button>
+      </div>
+      ${childrenHtml}
+    </div>
     <div class="collection-items">${rows || '<div class="wb-empty"><span class="fleuron">❦</span>'
       + '<p>这个主题还是空的。点右上角<b>「添加照片」</b>，'
       + '从<strong>你标过的精选</strong>、<strong>硬盘上的目录</strong>或<strong>另一个主题</strong>里挑。</p>'
@@ -137,6 +193,31 @@ function renderDetail() {
   if (edit) edit.onclick = editMetadata;
   const del = $('#collection-delete');
   if (del) del.onclick = removeCollection;
+
+  // 「+ 新建子主题」：建在当前主题之下（上下级关系）。
+  const newChild = $('#collection-new-child');
+  if (newChild) newChild.onclick = () => createCollection(detail.id);
+
+  // 「上级主题」：改当前主题的归属（或设为顶层）。下拉里已排除自己和自己的后代，
+  // 所以不会出现会成环的选项；服务端还有一道防环兜底。
+  const parentSelect = $('#collection-parent');
+  if (parentSelect) {
+    parentSelect.onchange = async (event) => {
+      const value = event.target.value;
+      await setParent(value ? Number(value) : null);
+    };
+  }
+
+  const goParent = $('#collection-go-parent');
+  if (goParent) {
+    goParent.onclick = () => { if (detail.parent_id != null) loadDetail(detail.parent_id); };
+  }
+
+  // 子主题目录卡：点开进入那个子主题。
+  node.querySelectorAll('.collection-child-card').forEach((card) => {
+    card.onclick = () => loadDetail(Number(card.dataset.collection));
+  });
+
   // ⚠️ 一律用 `closest('.ci-card')` 取所属卡片。改网格时把容器类名从
   // `.collection-item` 换成了 `.ci-card`，这三处必须跟着改 —— 漏一处就是
   // "按钮点了没反应"（而 `data-move` 那三个按钮长得一样，不测看不出来）。
@@ -179,17 +260,49 @@ async function loadDetail(collectionId) {
   }
 }
 
-async function createCollection() {
-  const name = prompt('主题名称（例如「蓝调时刻」「西北游记」）');
+async function createCollection(parentId = null) {
+  const name = prompt(parentId
+    ? '子主题名称（例如「奥尔梅克」「阿兹特克」）'
+    : '主题名称（例如「蓝调时刻」「西北游记」）');
   if (!name) return;
   const description = prompt('描述（可留空）') || null;
   try {
-    const created = await API.post('/api/collections', { name, description });
+    const payload = { name, description };
+    if (parentId) payload.parent_id = Number(parentId);
+    const created = await API.post('/api/collections', payload);
     await loadCollections();
     await loadDetail(created.id);
     toast(`已创建主题「${name}」`);
   } catch (error) {
     toast(`创建失败：${error.message}`, true);
+  }
+}
+
+/** 一个主题的所有后代（含孙辈）—— 用于把「自己 + 自己的后代」从上级下拉里排除。 */
+function descendantIdsOf(rootId) {
+  const result = new Set();
+  const walk = (id) => {
+    state.items.filter((item) => item.parent_id === id).forEach((child) => {
+      result.add(child.id);
+      walk(child.id);
+    });
+  };
+  walk(rootId);
+  return [...result];
+}
+
+/** 改当前主题的上级（传 null = 设为顶层）。服务端还会做防环兜底。 */
+async function setParent(parentId) {
+  const detail = state.detail;
+  if (!detail) return;
+  try {
+    await API.patch(`/api/collections/${detail.id}`,
+      parentId ? { parent_id: parentId } : { clear_parent: true });
+    await loadCollections();
+    await loadDetail(detail.id);
+    toast(parentId ? '已调整上级主题' : '已设为顶层主题');
+  } catch (error) {
+    toast(`调整失败：${error.message}`, true);
   }
 }
 
@@ -286,7 +399,7 @@ async function addShotsToCollection(collectionId, shotIds) {
 // --------------------------------------------------------------------- 绑定
 export function initCollections() {
   const create = $('#btn-collection-new');
-  if (create) create.onclick = createCollection;
+  if (create) create.onclick = () => createCollection();
 
   const list = $('#collections-list');
   if (list) {

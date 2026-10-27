@@ -996,26 +996,37 @@ def _selection_browse(
 def _collection_browse(
     db: Database, *, library_id: int | None, parent: str, limit: int
 ) -> list[dict[str, Any]]:
-    """主题轴：一层，列出全部 Collection（PRD §9.2.1）。
+    """主题轴：按上下级关系分层列出主题。
 
-    注意主题**不受 Library 限制**（PRD：「不受时间、地点或 Session 限制」），
+    主题**不受 Library 限制**（PRD：「不受时间、地点或 Session 限制」），
     因此这里**不按 library_id 过滤** —— 传了也不生效，这是刻意的。
+
+    `parent` 为空 → 顶层主题（`parent_id IS NULL`）；否则 → 该主题的直接子主题。
+    `has_children` 表主题是否还有子主题（前端据此显示下钻箭头）。
     """
-    del parent, library_id
+    del library_id
+    params: list[Any]
+    if parent:
+        where = "WHERE c.parent_id = ?"
+        params = [int(parent)]
+    else:
+        where = "WHERE c.parent_id IS NULL"
+        params = []
     rows = db.query(
         "SELECT c.id, c.name, COALESCE(c.description, '') AS description,"
         "       (SELECT COUNT(*) FROM collection_item ci"
         "         JOIN shot sh ON sh.id = ci.shot_id AND sh.retired_at IS NULL"
-        "        WHERE ci.collection_id = c.id) AS items"
-        "  FROM collection c ORDER BY c.sort_order, c.id LIMIT ?",
-        (int(limit),),
+        "        WHERE ci.collection_id = c.id) AS items,"
+        "       (SELECT COUNT(*) FROM collection ch WHERE ch.parent_id = c.id) AS children"
+        f"  FROM collection c {where} ORDER BY c.sort_order, c.id LIMIT ?",
+        (*params, int(limit)),
     )
     return [
         {
             "key": str(r["id"]),
             "label": str(r["name"]),
             "count": int(r["items"]),
-            "has_children": False,
+            "has_children": int(r["children"]) > 0,
             "description": r["description"],
         }
         for r in rows

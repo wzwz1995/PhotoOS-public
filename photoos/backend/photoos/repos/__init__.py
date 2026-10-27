@@ -684,10 +684,11 @@ class CollectionRepo:
         """
         rows = self.db.query(
             "SELECT c.id, c.uuid, c.name, c.description, c.cover_shot_id, c.sort_order,"
-            "       c.created_at, c.updated_at, c.source_json,"
+            "       c.parent_id, c.created_at, c.updated_at, c.source_json,"
             "       (SELECT COUNT(*) FROM collection_item ci"
             "          JOIN shot sh ON sh.id = ci.shot_id AND sh.retired_at IS NULL"
             "         WHERE ci.collection_id = c.id) AS items,"
+            "       (SELECT COUNT(*) FROM collection ch WHERE ch.parent_id = c.id) AS children,"
             "       COALESCE(c.cover_shot_id,"
             "                (SELECT ci2.shot_id FROM collection_item ci2"
             "                   JOIN shot sh2 ON sh2.id = ci2.shot_id AND sh2.retired_at IS NULL"
@@ -704,6 +705,8 @@ class CollectionRepo:
                 "name": r["name"],
                 "description": r["description"],
                 "sort_order": int(r["sort_order"]),
+                "parent_id": None if r["parent_id"] is None else int(r["parent_id"]),
+                "children": int(r["children"]),
                 "items": int(r["items"]),
                 "cover_shot_id": r["cover_shot_id"],
                 # 三级回退的最终结果（前端的封面取这张 Shot 的 primary asset 的 thumb）
@@ -759,6 +762,66 @@ class CollectionRepo:
             for r in rows
         ]
 
+    def children(self, collection_id: int) -> list[dict[str, Any]]:
+        """直接子主题（父主题详情里的「统合目录」区块）。
+
+        每个子主题只给「封面 + 名字 + 条目数」三样，够画一张可点开的目录卡。
+        条目数口径与 `list_all` 一致：数的是**用户看得见**的条目（`retired_at IS NULL`）。
+        """
+        rows = self.db.query(
+            "SELECT c.id, c.name, c.description, c.cover_shot_id,"
+            "       (SELECT COUNT(*) FROM collection_item ci"
+            "          JOIN shot sh ON sh.id = ci.shot_id AND sh.retired_at IS NULL"
+            "         WHERE ci.collection_id = c.id) AS items,"
+            "       COALESCE(c.cover_shot_id,"
+            "                (SELECT ci2.shot_id FROM collection_item ci2"
+            "                   JOIN shot sh2 ON sh2.id = ci2.shot_id AND sh2.retired_at IS NULL"
+            "                  WHERE ci2.collection_id = c.id"
+            "                  ORDER BY ci2.sort_order, ci2.shot_id LIMIT 1)) AS effective_cover"
+            "  FROM collection c"
+            " WHERE c.parent_id = ?"
+            " ORDER BY c.sort_order, c.id",
+            (int(collection_id),),
+        )
+        return [
+            {
+                "id": int(r["id"]),
+                "name": r["name"],
+                "description": r["description"],
+                "items": int(r["items"]),
+                "cover_shot_id": r["cover_shot_id"],
+                "effective_cover_shot_id": r["effective_cover"],
+            }
+            for r in rows
+        ]
+
+    def _would_create_cycle(self, collection_id: int, new_parent_id: int | None) -> bool:
+        """把 `collection_id` 挂到 `new_parent_id` 下是否会成环。
+
+        判据：从 `new_parent_id` 沿 parent_id 一路向上，若碰到 `collection_id`
+        （即 `collection_id` 是 `new_parent_id` 的祖先）或 `new_parent_id == collection_id`，
+        就成环。深度防御：途中若撞进一个既有的环（本不该出现），也一律当环处理。
+        """
+        if new_parent_id is None:
+            return False
+        current: int | None = int(new_parent_id)
+        seen: set[int] = set()
+        while current is not None:
+            if current in seen or current == int(collection_id):
+                return True
+            seen.add(current)
+            row = self.db.query_one("SELECT parent_id FROM collection WHERE id = ?", (current,))
+            if row is None or row["parent_id"] is None:
+                return False
+            current = int(row["parent_id"])
+        return False
+
+    def _validate_parent(self, parent_id: int | None) -> None:
+        if parent_id is None:
+            return
+        if self.get(int(parent_id)) is None:
+            raise ValueError(f"上级主题 {parent_id} 不存在")
+
     def collections_of_shot(self, shot_id: int) -> list[dict[str, Any]]:
         """反查"这张作品属于哪些主题"（详情抽屉要用；PRD 允许一张属多个主题）。"""
         rows = self.db.query(
@@ -792,6 +855,7 @@ class CollectionRepo:
         sort_order: int = 0,
         uuid: str | None = None,
         source: dict[str, Any] | None = None,
+        parent_id: int | None = None,
     ) -> int:
         """新建主题。返回 id。
 
@@ -802,23 +866,29 @@ class CollectionRepo:
         `source` 记录**这个主题是怎么来的**（用户的工作流是"精选 → 按关键词或
         时间地点建主题"，所以主题必须能回答"我是从哪个词/哪个人来的"）。
         形状见迁移 008 末尾。
+
+        `parent_id` 让新主题直接成为某个主题的子主题（上下级关系）。
+        新建不可能成环（新行还没有 id），只需确认父主题存在。
         """
         from ..db import utc_now
 
         if not str(name).strip():
             raise ValueError("主题名称不能为空")
+        self._validate_parent(parent_id)
         stamp = utc_now()
         identity = uuid or __import__("uuid").uuid4().hex
         with self.db.write() as conn:
             cursor = conn.execute(
                 "INSERT INTO collection (uuid, name, description, cover_shot_id, sort_order,"
-                " source_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                " parent_id, source_json, created_at, updated_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     identity,
                     str(name).strip(),
                     description,
                     cover_shot_id,
                     int(sort_order),
+                    None if parent_id is None else int(parent_id),
                     None if source is None else json.dumps(source, ensure_ascii=False),
                     stamp,
                     stamp,
@@ -843,8 +913,10 @@ class CollectionRepo:
         cover_shot_id: int | None = None,
         clear_cover: bool = False,
         sort_order: int | None = None,
+        parent_id: int | None = None,
+        clear_parent: bool = False,
     ) -> bool:
-        """改名称/描述/封面/排序。只更新传入的字段。"""
+        """改名称/描述/封面/排序/上级主题。只更新传入的字段。"""
         from ..db import utc_now
 
         fields: list[str] = []
@@ -865,6 +937,14 @@ class CollectionRepo:
         if sort_order is not None:
             fields.append("sort_order = ?")
             params.append(int(sort_order))
+        if clear_parent:
+            fields.append("parent_id = NULL")
+        elif parent_id is not None:
+            self._validate_parent(parent_id)
+            if self._would_create_cycle(collection_id, parent_id):
+                raise ValueError("不能把主题挂到它自己或它的子主题下面（会形成环）")
+            fields.append("parent_id = ?")
+            params.append(int(parent_id))
         if not fields:
             return False
         fields.append("updated_at = ?")

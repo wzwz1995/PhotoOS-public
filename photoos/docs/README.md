@@ -21,6 +21,7 @@
 | 出问题了 | [`07-runbook.md`](07-runbook.md) 的排障一节 |
 | 想知道"为什么是这样" | [`08-decisions.md`](08-decisions.md) |
 | 想知道最近改了什么 | [`09-changelog.md`](09-changelog.md) |
+| 🧠 记忆不工作了 / 想改 AI 助手记忆的配置 | [`14-hindsight-memory.md`](14-hindsight-memory.md) |
 
 ---
 
@@ -41,12 +42,13 @@
 | [`11-shell-unification.md`](11-shell-unification.md) | 统一外壳（方案 A）**实施方案**：四个视角共用一个外壳、抽三样东西、六步落地、验收判据 |
 | [`12-multidim-filter-plan.md`](12-multidim-filter-plan.md) | **多维筛选重构执行计划**：照片库做成主筛选台（内容×元数据×人物）、筛选上顶栏、弹窗渐进式标签、精选页由粗到细 |
 | [`13-raw-orientation.md`](13-raw-orientation.md) | **RAW 预览方向反了**（3,861 张）：LibRaw `sizes.flip` 被用在了内嵌预览上。实测 CLIP 不受影响、**SFace 完全失效**。修复步骤待 `E:` 盘上线 |
+| [`14-hindsight-memory.md`](14-hindsight-memory.md) | **AI 助手的本地长期记忆**：Hindsight 插件从 cloud 改走本机 daemon（`127.0.0.1:9077`）；内嵌 PostgreSQL + 本地嵌入/重排模型 + DeepSeek 抽取，含开机自启、验证手段与六个网络坑 |
 
 ---
 
 ## ⭐ 完整技术参考（`20-reference/`）
 
-上面那 13 篇是"够用就好"的接手笔记；**要完整正规的技术参考、要看架构图与 ER 图，
+上面那 14 篇是"够用就好"的接手笔记；**要完整正规的技术参考、要看架构图与 ER 图，
 去 [`20-reference/`](20-reference/README.md)** —— 含架构总览、数据建模（31 张表 + ER 图）、
 后端模块地图、HTTP/CLI 接口参考、任务引擎、媒体流水线与 AI 子系统、前端架构、
 安全边界，以及**需要人拍板的 35 条问题**清单。

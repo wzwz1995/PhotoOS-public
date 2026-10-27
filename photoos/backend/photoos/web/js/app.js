@@ -81,6 +81,11 @@ const state = {
   offset: 0,
   pageSize: 300,
   loading: false,
+  /**
+   * 正在跑的那一次 `/api/assets` 请求。
+   * 并发调用共用它，而不是直接丢弃后到的请求 —— 见 `loadAssets` 的说明。
+   */
+  loadingPromise: null,
   filters: {
     file_type: '', status: '', camera: '', lens: '',
     focalMin: '', focalMax: '',
@@ -127,6 +132,11 @@ const state = {
   pollTimer: null,
   /** 照片墙只在“会影响照片列表的任务”开始/结束时刷新一次，不在每个轮询里重建网格。 */
   libraryRefreshKey: '',
+  /**
+   * 「照片库该重读了」的标记。任务在别的页（例如导入后的维护页）跑完时只置位，
+   * 等用户切回照片库再读 —— 在看不见的页上白跑四次网络请求没有意义。
+   */
+  libraryStale: false,
   /** 照片墙默认把一个 Shot 的多个文件折成一张卡；可切回按文件。 */
   groupShots: (() => {
     try { return localStorage.getItem('photoos.groupShots') !== '0'; } catch { return true; }
@@ -269,6 +279,10 @@ function setView(view) {
     const panel = $('#lib-filter');
     if (panel) panel.hidden = false;
     renderFilterSummary();
+    // ⚠️ 切回来**必须**检查一次。导入面板一点开就会跳到维护页（见 `showImportPanel`），
+    // 任务全在那边跑完；以前这里什么都不读，用户切回照片库看到的还是导入前那一屏，
+    // 只能再手动刷一次 —— 这就是"新导入的照片还得手动刷新"的来源。
+    if (state.libraryStale) refreshLibrary();
   } else {
     const panel = $('#lib-filter');
     if (panel) panel.hidden = true;
@@ -704,7 +718,7 @@ async function waitForIndexThenRegroup(hint, jobId = null) {
       if (hint) hint.textContent = '索引完成，正在分组（生成拍摄组与场景）…';
       try {
         await API.post('/api/actions/regroup/run', {});
-        if (hint) hint.textContent = '已开始分组。完成后点「刷新」即可浏览，精选页也会有内容。';
+        if (hint) hint.textContent = '已开始分组。分组完成这里会自动更新，精选页也会有内容。';
       } catch (error) {
         if (hint) hint.textContent = `分组启动失败：${error.message}（可到维护页手动点「现在分组」）`;
       }
@@ -758,7 +772,9 @@ function bindEmptyLibrary() {
   const jobs = $('#lib-scan-jobs');
   if (jobs) jobs.onclick = showJobs;
   const refresh = $('#lib-refresh');
-  if (refresh) refresh.onclick = () => loadAssets();
+  // 空库引导里的「刷新」和工具栏那个是同一件事：库统计（它决定这句"还没有照片"）
+  // 也要一起重读，否则照片进库了这句话还挂着。
+  if (refresh) refresh.onclick = () => refreshLibrary({ manual: true });
 }
 
 /**
@@ -817,60 +833,121 @@ function setShotFold(enabled) {
   updateGridSummary();
 }
 
-async function loadAssets({ append = false } = {}) {
-  if (state.loading) return;
-  if (append && state.offset >= state.total) return;
+/**
+ * 读第一屏 / 下一页照片。
+ *
+ * ⚠️ 并发时**共用同一个请求**，不能像以前那样 `if (state.loading) return;` 直接丢弃：
+ * 手动点「刷新」很容易正好撞上自动刷新或翻页，那样按钮点下去毫无反应，
+ * 用户只能再点一次 —— 看起来就是"刷新不管用"。
+ */
+function loadAssets({ append = false } = {}) {
+  if (state.loading) return state.loadingPromise;
+  if (append && state.offset >= state.total) return Promise.resolve();
   state.loading = true;
-  try {
-    if (!append) { state.offset = 0; grid.reset(); }
-    const payload = await API.get(`/api/assets?${buildQuery()}`);
-    clearGridError();                         // 上一次的失败已经过去了
-    state.total = payload.total;
-    state.offset = payload.offset + payload.items.length;
-    grid.setItems(payload.items, append);
-    grid.rearm();
-    const library = state.libraries.find((item) => item.id === state.activeLibraryId);
-    const libraryEmpty = !library || !library.stats || (library.stats.assets ?? 0) === 0;
-    if (payload.total !== 0) {
-      updateGridSummary();
-    } else {
-      $('#grid-summary').textContent = libraryEmpty ? '这个库还没有照片' : '没有匹配的照片';
+  state.loadingPromise = (async () => {
+    try {
+      if (!append) { state.offset = 0; grid.reset(); }
+      const payload = await API.get(`/api/assets?${buildQuery()}`);
+      clearGridError();                         // 上一次的失败已经过去了
+      state.total = payload.total;
+      state.offset = payload.offset + payload.items.length;
+      grid.setItems(payload.items, append);
+      grid.rearm();
+      const library = state.libraries.find((item) => item.id === state.activeLibraryId);
+      const libraryEmpty = !library || !library.stats || (library.stats.assets ?? 0) === 0;
+      if (payload.total !== 0) {
+        updateGridSummary();
+      } else {
+        $('#grid-summary').textContent = libraryEmpty ? '这个库还没有照片' : '没有匹配的照片';
+      }
+      if (payload.total === 0 && libraryEmpty) {
+        showGridError(emptyLibraryHtml(library), () => loadAssets());
+        bindEmptyLibrary();
+      } else {
+        clearGridError();
+      }
+      $('#load-more').disabled = state.offset >= payload.total;
+      if (!append) grid.scrollToTop();
+    } catch (error) {
+      // 以前这里只有一句 toast（几秒就消失），网格**留着上一次的内容** ——
+      // 用户会以为"这就是全部结果"。现在失败是一个留得住的、可重试的状态。
+      toast(`加载失败：${error.message}`, true);
+      state.total = 0;
+      state.items = [];
+      state.displayItems = [];
+      grid.reset();
+      grid.setItems([], false);
+      const summary = $('#grid-summary');
+      if (summary) summary.textContent = '读取失败';
+      const more = $('#load-more');
+      if (more) more.disabled = true;
+      showGridError(errorHtml('照片列表', error.message, {
+        retry: () => loadAssets(),
+        hint: '库还在硬盘上时，多半是后台任务正占着数据库读锁；过几秒重试通常就好。',
+      }), () => loadAssets());
+    } finally {
+      state.loading = false;
+      state.loadingPromise = null;
+      // 条件条跟着结果一起更新：它是 state 的**只读投影**，
+      // 放在 finally 里是为了"加载失败"时也能如实显示当前条件（否则用户会以为条件没了）。
+      renderLibraryQueryBar();
     }
-    if (payload.total === 0 && libraryEmpty) {
-      showGridError(emptyLibraryHtml(library), () => loadAssets());
-      bindEmptyLibrary();
-    } else {
-      clearGridError();
-    }
-    $('#load-more').disabled = state.offset >= payload.total;
-    if (!append) grid.scrollToTop();
-  } catch (error) {
-    // 以前这里只有一句 toast（几秒就消失），网格**留着上一次的内容** ——
-    // 用户会以为"这就是全部结果"。现在失败是一个留得住的、可重试的状态。
-    toast(`加载失败：${error.message}`, true);
-    state.total = 0;
-    state.items = [];
-    state.displayItems = [];
-    grid.reset();
-    grid.setItems([], false);
-    const summary = $('#grid-summary');
-    if (summary) summary.textContent = '读取失败';
-    const more = $('#load-more');
-    if (more) more.disabled = true;
-    showGridError(errorHtml('照片列表', error.message, {
-      retry: () => loadAssets(),
-      hint: '库还在硬盘上时，多半是后台任务正占着数据库读锁；过几秒重试通常就好。',
-    }), () => loadAssets());
-  } finally {
-    state.loading = false;
-    // 条件条跟着结果一起更新：它是 state 的**只读投影**，
-    // 放在 finally 里是为了"加载失败"时也能如实显示当前条件（否则用户会以为条件没了）。
-    renderLibraryQueryBar();
-  }
+  })();
+  return state.loadingPromise;
 }
 
 function loadMore() {
   loadAssets({ append: true });
+}
+
+/**
+ * 重读照片库这一屏的**全部**数据。
+ *
+ * 为什么是"全部"：照片列表、左栏的库与统计、浏览轴、筛选下拉项来自四个接口。
+ * 只重读 `/api/assets` 会留下"网格里已经有新照片、左栏还写着旧张数、
+ * 机型下拉里没有新机型"的半新半旧状态 —— 用户就会怀疑到底刷没刷。
+ *
+ * 谁在调它：工具栏的「刷新」按钮、会改动照片列表的后台任务开始/结束时、
+ * 以及从别的页切回照片库时。三处都走同一个函数，各写一遍必然会漏掉一两个接口。
+ */
+async function refreshLibrary({ manual = false } = {}) {
+  try {
+    // 先读库列表（它决定 `activeLibraryId`），再并行走浏览轴与筛选项，最后读照片：
+    // 照片的查询条件来自前三者，顺序反了就会先用旧条件拉一遍、再用新条件拉一遍。
+    await loadLibraries();
+    await Promise.all([loadFacets(), loadBrowseNodes()]);
+    await loadAssets();
+  } catch (error) {
+    toast(`刷新失败：${error.message}`, true);
+    return state.total;
+  } finally {
+    // 不论成败都算"已经对过账"：失败时用户手上已经有「刷新」按钮和错误提示，
+    // 不该在他每次切回照片库时都重新撞一次同一个错。
+    state.libraryStale = false;
+  }
+  if (manual) {
+    const total = Number(state.total) || 0;
+    toast(total ? `已刷新 · 共 ${total} 张` : '已刷新 · 当前条件下没有照片');
+  }
+  return state.total;
+}
+
+/** 工具栏的「刷新」：图标转圈 + 禁用，直到数据回来（连点不会叠请求）。 */
+async function runLibraryReload() {
+  const button = $('#lib-reload');
+  setReloadBusy(button, true);
+  try {
+    await refreshLibrary({ manual: true });
+  } finally {
+    setReloadBusy(button, false);
+  }
+}
+
+function setReloadBusy(button, busy) {
+  if (!button) return;
+  button.disabled = busy;
+  button.classList.toggle('is-busy', busy);
+  button.setAttribute('aria-busy', busy ? 'true' : 'false');
 }
 
 // ----------------------------------------------------------------- 条件条（照片库）
@@ -2156,11 +2233,14 @@ const JOB_LABELS = {
   backup: '备份',
 };
 
-async function refreshJobs() {
+async function refreshJobs({ note = true } = {}) {
   try {
     const payload = await API.get('/api/jobs?limit=15');
-    state.jobs = payload.jobs;
+    state.jobs = payload.jobs || [];
     state.runningJobId = payload.running_job_id;
+    // ⚠️ 先比对、再画：下面任何一处渲染出问题（比如某条任务带着奇怪字段）都不该
+    // 把"该重读照片墙"这件事一起吞掉 —— 那正是用户抱怨的那个症状。
+    if (note) noteLibraryJobsChanged();
     renderJobs();
     renderImportTaskFromState();
     renderAdbTaskFromState();
@@ -2182,6 +2262,63 @@ const LIBRARY_REFRESH_JOB_TYPES = new Set([
   'scan', 'hash', 'metadata', 'preview', 'fused', 'full_index',
   'classify_import', 'reject_cleanup', 'regroup', 'rebind',
 ]);
+
+/** 任务是否还在跑（这几个状态都算"没结束"）。 */
+const ACTIVE_JOB_STATES = ['PROCESSING', 'PENDING', 'RETRY', 'PAUSED'];
+
+/**
+ * 会影响照片墙的任务，压成一个可比对的字符串；变了就说明该重读了。
+ *
+ * 除了"正在跑的任务集合"，**最新任务 id 也进 key**：分组有时两秒就跑完，
+ * 整个生命周期落在两次轮询之间 —— 只看进行中的集合会完全看不到它。
+ */
+function computeLibraryRefreshKey() {
+  let newest = 0;
+  const active = [];
+  for (const job of state.jobs || []) {
+    const affectsLibrary = LIBRARY_REFRESH_JOB_TYPES.has(job.type)
+      || (job.type === 'cli_action' && ['index', 'index_library'].includes(job.action_id));
+    if (!affectsLibrary) continue;
+    newest = Math.max(newest, Number(job.id) || 0);
+    if (ACTIVE_JOB_STATES.includes(job.status)) active.push(`${job.id}:${job.status}`);
+  }
+  // 排序后再拼：`/api/jobs` 的顺序不该影响"变没变"。
+  return `${newest}|${active.sort().join(',')}`;
+}
+
+/**
+ * 任务列表变了 → 标记照片墙该重读了。
+ *
+ * 在照片库就立刻排一次重读；在别的页只记一个 `libraryStale`，等切回照片库
+ * 由 `setView` 去补 —— 在看不见的页上白跑请求没有意义。
+ * 由 `refreshJobs()` 在更新完 `state.jobs` 之后调用，别在调用方重复算 key。
+ */
+function noteLibraryJobsChanged() {
+  const key = computeLibraryRefreshKey();
+  if (key === state.libraryRefreshKey) return;
+  state.libraryRefreshKey = key;
+  if (state.view === 'library') {
+    // 开始与结束各刷一次；任务中间的进度更新不碰网格（否则十分钟的索引期间别想滚动）。
+    scheduleLibraryRefresh();
+  } else {
+    state.libraryStale = true;
+  }
+}
+
+let libraryRefreshTimer = 0;
+/**
+ * 合并短时间内的多次"该重读了"。
+ *
+ * 一次导入会连着起扫描/索引/缩略图/分组好几个任务，每个任务的开始与结束都改 key；
+ * 逐个立刻重读就是十几次整墙重建 —— 合并成一次，用户只看得到最后那一下。
+ */
+function scheduleLibraryRefresh() {
+  if (libraryRefreshTimer) clearTimeout(libraryRefreshTimer);
+  libraryRefreshTimer = setTimeout(() => {
+    libraryRefreshTimer = 0;
+    refreshLibrary();
+  }, 800);
+}
 
 /** 导入卡片里那条"本次任务"状态（B 方案：把反馈放回按钮下面）。 */
 function renderImportTask(job) {
@@ -3186,6 +3323,9 @@ function bindEvents() {
     $('#shot-fold-toggle').onclick = () => setShotFold(!state.groupShots);
   }
   syncShotFoldButton();
+  if ($('#lib-reload')) {
+    $('#lib-reload').onclick = () => runLibraryReload();
+  }
 
   document.querySelectorAll('button[data-run]').forEach((button) => {
     button.onclick = () => startJob(button.dataset.run);
@@ -4148,38 +4288,19 @@ async function boot() {
   await loadBrowseNodes();
   await loadAssets();
   await loadFacets();
-  await refreshJobs();
+  await refreshJobs({ note: false });   // 启动这一下不算"变了"
+  // 记下此刻的 key：启动时已经在跑的任务（例如重开页面时索引还没结束），
+  // 等它结束时才认得出"变了"。
+  state.libraryRefreshKey = computeLibraryRefreshKey();
   await refreshAbout();
 
   state.pollTimer = setInterval(() => {
     refreshHealth();
+    // 比对在 `refreshJobs()` 内部做（见 `noteLibraryJobsChanged`）：
+    // 那里才拿得到刚更新的任务列表，且**每个视图**都比对 —— 导入面板一点开会跳到
+    // 维护页（见 `showImportPanel`），旧代码把比对套在 `state.view === 'library'`
+    // 里，任务在维护页跑完时一次都没比过，切回来网格还是导入前的那一张。
     refreshJobs();
-    if (state.view === 'library') {
-      // ⚠️ 照片墙不能每 4 秒重建一次。以前只要**任意**任务在跑就 loadAssets()，
-      // 连 ADB 拉取（跟照片列表毫无关系）也会让网格每隔 4 秒跳一下；
-      // 而且索引/导入跑十分钟，用户就十分钟没法安稳滚动。
-      // 现在只在“会影响照片列表的任务”开始/结束时刷新一次。
-      const key = (state.jobs || [])
-        .filter((job) => {
-          const affectsLibrary = LIBRARY_REFRESH_JOB_TYPES.has(job.type)
-            || (job.type === 'cli_action'
-              && ['index', 'index_library'].includes(job.action_id));
-          return affectsLibrary
-            && ['PROCESSING', 'PENDING', 'RETRY', 'PAUSED'].includes(job.status);
-        })
-        .map((job) => `${job.id}:${job.status}`)
-        .sort()
-        .join(',');
-      if (key !== state.libraryRefreshKey) {
-        const previous = state.libraryRefreshKey;
-        state.libraryRefreshKey = key;
-        // 开始和结束各刷一次；中间的进度更新不碰网格。
-        if (key || previous) {
-          loadAssets();
-          loadLibraries();
-        }
-      }
-    }
   }, 4000);
 }
 

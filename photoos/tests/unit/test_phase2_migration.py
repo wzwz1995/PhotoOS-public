@@ -156,7 +156,39 @@ def test_007_hit_cascades_when_the_shot_disappears(migrated: Database) -> None:
     assert queries == 1, "查询身份不该随 Shot 消失"
 
 
-def test_006_preserves_phase1_tables(migrated: Database) -> None:
+def test_012_adds_collection_hierarchy(migrated: Database) -> None:
+    """迁移 012：主题上下级关系 —— collection.parent_id + 反查索引。"""
+    cols = _columns(migrated, "collection")
+    assert "parent_id" in cols
+    assert "idx_collection_parent" in _objects(migrated, "index")
+
+
+def test_012_parent_id_is_self_referential_fk_with_set_null(migrated: Database) -> None:
+    """★ 删除父主题时，子主题**升为顶层**（SET NULL），不被级联删除。
+
+    铁律 #5：删一个主题不该连带吞掉用户的其它主题。这条测试把"为什么用
+    SET NULL 而不是 CASCADE"钉成可执行证据。
+    """
+    with migrated.write() as conn:
+        conn.execute(
+            "INSERT INTO collection (uuid, name, created_at, updated_at)"
+            " VALUES ('u1', '世界树之巅', '2026-01-01T00:00:00+08:00', '2026-01-01T00:00:00+08:00')"
+        )
+        parent = conn.execute("SELECT id FROM collection WHERE uuid = 'u1'").fetchone()[0]
+        conn.execute(
+            "INSERT INTO collection (uuid, name, parent_id, created_at, updated_at)"
+            " VALUES ('u2', '奥尔梅克', ?, '2026-01-01T00:00:00+08:00', '2026-01-01T00:00:00+08:00')",
+            (parent,),
+        )
+        conn.execute("DELETE FROM collection WHERE id = ?", (parent,))
+    with migrated.read() as conn:
+        row = conn.execute("SELECT name, parent_id FROM collection WHERE uuid = 'u2'").fetchone()
+        assert row is not None, "删除父主题后子主题必须还在"
+        assert row["name"] == "奥尔梅克"
+        assert row["parent_id"] is None, "删除父主题后子主题应升为顶层"
+
+
+
     """006 是对 001-005 的**纯增量**：不得重建或丢失任何既有表。"""
     tables = _objects(migrated, "table")
     phase1 = {

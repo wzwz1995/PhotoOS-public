@@ -344,3 +344,81 @@ def test_collections_do_not_require_photo_files_to_exist(db: Database) -> None:
     # 主题列表与条目照样可用
     assert repo.list_all()[0]["items"] == 2
     assert len(repo.items(cid)) == 2
+
+
+# ============================================================ 上下级关系（012）
+
+def test_create_with_parent(db: Database) -> None:
+    repo = CollectionRepo(db)
+    parent = repo.create("世界树之巅")
+    child = repo.create("奥尔梅克", parent_id=parent)
+    assert repo.get(child)["parent_id"] == parent
+    assert repo.get(parent)["parent_id"] is None
+
+
+def test_create_with_missing_parent_raises(db: Database) -> None:
+    with pytest.raises(ValueError):
+        CollectionRepo(db).create("孤儿", parent_id=999)
+
+
+def test_children_returns_direct_children_with_items(db: Database) -> None:
+    repo = CollectionRepo(db)
+    parent = repo.create("世界树之巅")
+    olmec = repo.create("奥尔梅克", parent_id=parent)
+    aztec = repo.create("阿兹特克", parent_id=parent)
+    repo.add_shots(olmec, [1, 2])
+    repo.add_shots(aztec, [3])
+    children = repo.children(parent)
+    assert sorted(c["name"] for c in children) == ["奥尔梅克", "阿兹特克"]
+    by_name = {c["name"]: c for c in children}
+    assert by_name["奥尔梅克"]["items"] == 2
+    assert by_name["阿兹特克"]["items"] == 1
+
+
+def test_update_set_and_clear_parent(db: Database) -> None:
+    repo = CollectionRepo(db)
+    parent = repo.create("世界树之巅")
+    child = repo.create("奥尔梅克")
+    assert repo.update(child, parent_id=parent) is True
+    assert repo.get(child)["parent_id"] == parent
+    assert repo.update(child, clear_parent=True) is True
+    assert repo.get(child)["parent_id"] is None
+
+
+def test_list_all_includes_parent_id(db: Database) -> None:
+    repo = CollectionRepo(db)
+    parent = repo.create("世界树之巅")
+    repo.create("奥尔梅克", parent_id=parent)
+    by_name = {c["name"]: c for c in repo.list_all()}
+    assert by_name["世界树之巅"]["parent_id"] is None
+    assert by_name["奥尔梅克"]["parent_id"] == parent
+
+
+def test_cannot_set_parent_to_self(db: Database) -> None:
+    repo = CollectionRepo(db)
+    cid = repo.create("主题")
+    with pytest.raises(ValueError):
+        repo.update(cid, parent_id=cid)
+
+
+def test_cannot_set_parent_to_descendant(db: Database) -> None:
+    """防环：不能把主题挂到它自己的后代下面（A → B → A 会成环）。"""
+    repo = CollectionRepo(db)
+    a = repo.create("世界树之巅")
+    b = repo.create("奥尔梅克", parent_id=a)
+    repo.create("石像", parent_id=b)          # a → b → c
+    with pytest.raises(ValueError):
+        repo.update(a, parent_id=b)            # 把 a 挂到 b 下 = 环
+
+
+def test_delete_parent_promotes_children_to_top_level(db: Database) -> None:
+    """删除父主题只删它自己与自己的照片；子主题升为顶层（不级联删子主题）。"""
+    repo = CollectionRepo(db)
+    parent = repo.create("世界树之巅")
+    child = repo.create("奥尔梅克", parent_id=parent)
+    repo.add_shots(parent, [1])
+    repo.add_shots(child, [2])
+    assert repo.delete(parent) is True
+    assert repo.get(parent) is None
+    assert repo.get(child)["parent_id"] is None          # 子主题升为顶层
+    assert [i["shot_id"] for i in repo.items(child)] == [2]  # 子主题的照片还在

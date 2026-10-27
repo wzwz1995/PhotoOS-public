@@ -277,10 +277,25 @@
       <div class="content">
         <div class="toolbar">
           <div class="summary" id="grid-summary">载入中…</div>
-          <button class="btn small ghost" id="shot-fold-toggle" type="button"
-                  title="同一个拍摄组的 JPG/RAW 折成一张卡；切回按文件可逐个查看">
-            按拍摄组
-          </button>
+          <div class="toolbar-actions">
+            <button class="btn small ghost" id="shot-fold-toggle" type="button"
+                    title="同一个拍摄组的 JPG/RAW 折成一张卡；切回按文件可逐个查看">
+              按拍摄组
+            </button>
+            <!-- 新导入/新扫到的照片不会自己长出来：会改变照片列表的后台任务结束时、
+                 以及从别的页切回照片库时，这一屏会自己重读一次（见 `refreshLibrary`）。
+                 这个按钮是"我现在就要看到"的那一下，也是任务之外改了库
+                 （例如手动把照片拷进日期目录）时唯一能让列表对齐的入口。 -->
+            <button class="btn small ghost btn-reload" id="lib-reload" type="button"
+                    title="重新读取照片列表、库统计与筛选下拉项">
+              <span class="reload-icon" aria-hidden="true"><svg width="13" height="13"
+                   viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"
+                   stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="21 4 21 10 15 10"/>
+                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L21 10"/>
+              </svg></span>刷新
+            </button>
+          </div>
         </div>
 
         <!-- 「当前条件」：把左栏筛的东西、以及正在看的范围汇总成一行可逐个撤掉的芯片。
@@ -453,6 +468,8 @@
         <p class="hint">
           主题是<strong>你主动创建的长期作品集合</strong>，不受时间、地点或场次限制 ——
           「蓝调时刻」可以横跨不同年份与城市。同一张照片可以同时属于多个主题。
+          主题还可以有<strong>上下级</strong>：比如「世界树之巅」下分「奥尔梅克」「阿兹特克」，
+          父主题照常放自己的照片，子主题作为它的目录入口展示。
         </p>
         <p class="hint tiny">
           加入或移出只改变数据库关系，<strong>不移动、不复制、不删除任何照片</strong>。

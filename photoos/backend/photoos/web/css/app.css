@@ -745,6 +745,17 @@ code {
 .toolbar-actions { display: flex; align-items: center; gap: var(--sp-4); }
 .toolbar-actions select { width: auto; }
 
+/* 刷新按钮：点下去**图标**转圈，文字与按钮宽度都不动 ——
+   转整个按钮会让左边那句汇总、右边的「按拍摄组」跟着抖一下。
+   `prefers-reduced-motion` 交给全局那条规则统一压掉（转圈变成静止图标），
+   这里不再重复写：禁用态本身已经在说"正在读"。 */
+.btn-reload .reload-icon { display: inline-flex; }
+.btn-reload.is-busy .reload-icon { animation: reload-spin 0.9s linear infinite; }
+@keyframes reload-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 .grid-scroll { flex: 1; overflow: auto; padding: var(--sp-4) var(--gutter) 40px; }
 .grid { position: relative; display: block; }
 .card {

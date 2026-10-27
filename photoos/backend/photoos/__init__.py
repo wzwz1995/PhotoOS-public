@@ -8,6 +8,6 @@ r"""PhotoOS · 个人摄影管理系统（Phase 1: Photo Library Foundation）
   * Phase 1 只实现 Phase 1 功能；下一阶段只预留必要接口。
 """
 
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 
 __all__ = ["__version__"]
