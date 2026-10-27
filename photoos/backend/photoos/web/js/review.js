@@ -26,7 +26,7 @@ import {
   API, $, toast, escapeHtml, baseName, formatWhen, selectionLabel, selectionClass,
   SELECTION_LABELS,
 } from './shared.js';
-// 图源只走这里：URL 模板在全应用只该有一处（见 docs/11-shell-unification.md 七）。
+// 图源只走这里：URL 模板在全应用只该有一处（外壳统一第七条）。
 // ⚠️ 精选页这三处**都没有可点的文件名**（比较卡显示的是"时刻 + 状态 + 你的理由"，
 // 选中理由靠卡片整块点击切换当前项），所以只统一图源，不套 `fileBlock()` ——
 // 硬加一个原片入口会改掉这一页的键盘流与点击语义。

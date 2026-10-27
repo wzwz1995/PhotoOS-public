@@ -28,7 +28,7 @@
 
 import { API, $, toast, escapeHtml, baseName, formatWhen, loadingHtml, selectionLabel, selectionClass,
   SELECTION_LABELS } from './shared.js';
-// 图源只走这里：URL 模板在全应用只该有一处（见 docs/11-shell-unification.md 七）。
+// 图源只走这里：URL 模板在全应用只该有一处（外壳统一第七条）。
 // ⚠️ 这两个格子（`.wb-pick` / `.wb-chip`）**不画文件名**，所以不用 `fileBlock()` ——
 // 它们的语义是"挑一张"，不是"看这张的原片"。
 import { assetImgAttrs } from './cards.js';

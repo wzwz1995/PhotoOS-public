@@ -41,7 +41,7 @@ import {
   $, API, baseName, errorHtml, escapeHtml, loadingHtml, toast, bindRetryButtons,
 } from './shared.js';
 // 卡片公共件：图源、状态徽标、"文件夹 + 文件名 + 看原片"这一行都从这里来
-// （改造前这一页自己拼了全部四样，别的页面又各拼一遍 —— 见 docs/11-shell-unification.md）。
+// （改造前这一页自己拼了全部四样，别的页面又各拼一遍）。
 import {
   assetImageUrl, assetImgAttrs, badgeHtml, bindOpenAsset, dayPart, fileBlock, hourPart,
   updateBadge,
